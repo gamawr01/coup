@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
@@ -37,7 +38,7 @@ export default function Home() {
     setIsProcessing(true);
     console.log("[updateGameState] Starting state update...");
     try {
-        let newState: GameState;
+        let newState: GameState | undefined | null; // Allow undefined/null initially
         if (typeof newStateOrFn === 'function') {
             console.log("[updateGameState] Executing state update function...");
             const result = await newStateOrFn(); // Await the function which might be async
@@ -49,21 +50,30 @@ export default function Home() {
             console.log("[updateGameState] State value resolved.");
         }
 
+       if (!newState) {
+         console.error("[updateGameState] Error: Received invalid (null or undefined) state from update function/promise.");
+         toast({ title: "Error", description: "Failed to update game state.", variant: "destructive" });
+         setIsProcessing(false); // Reset processing flag on error
+         return; // Prevent further processing with invalid state
+       }
+
+
         console.log("[updateGameState] New state received:", newState);
         setGameState(newState); // Update the React state
 
         // Check for winner after state update
-        if (newState.winner) {
+        // Check if newState itself is valid before accessing properties
+        if (newState && newState.winner) {
              toast({
                title: "Game Over!",
                description: `${newState.winner.name} wins!`,
                duration: 10000, // Keep winner message longer
              });
              console.log("[updateGameState] Winner detected:", newState.winner.name);
-        } else {
+        } else if (newState) { // Check newState exists before logging whose turn it is
             // Log whose turn it is after state update
             const currentPlayer = newState.players[newState.currentPlayerIndex];
-             console.log(`[updateGameState] State updated. Current turn: ${currentPlayer.name} (${currentPlayer.isAI ? 'AI' : 'Human'}). Needs AI trigger: ${newState.needsHumanTriggerForAI}`);
+             console.log(`[updateGameState] State updated. Current turn: ${currentPlayer?.name || 'Unknown'} (${currentPlayer?.isAI ? 'AI' : 'Human'}). Needs AI trigger: ${newState.needsHumanTriggerForAI}`);
         }
 
 
@@ -90,13 +100,13 @@ export default function Home() {
     let initialState = initializeGame([playerName], aiCount);
     const initialPlayer = initialState.players[initialState.currentPlayerIndex];
     setHumanPlayerId(initialState.players.find(p => !p.isAI)?.id || 'player-0');
-    toast({ title: "Game Started!", description: `Playing against ${aiCount} AI opponents. ${initialPlayer.name}'s turn.` });
+    toast({ title: "Game Started!", description: `Playing against ${aiCount} AI opponents. ${initialPlayer?.name}'s turn.` });
     setGameStarted(true);
     console.log("[startGame] Game initialized. Initial state:", initialState);
-    console.log(`[startGame] First turn: ${initialPlayer.name} (${initialPlayer.isAI ? 'AI' : 'Human'})`);
+    console.log(`[startGame] First turn: ${initialPlayer?.name} (${initialPlayer?.isAI ? 'AI' : 'Human'})`);
 
     // If the first player is AI, set the flag to wait for the trigger button.
-    if (initialPlayer.isAI) {
+    if (initialPlayer?.isAI) {
         console.log(`[startGame] Initial player ${initialPlayer.name} is AI. Setting needsHumanTriggerForAI flag.`);
         initialState = { ...initialState, needsHumanTriggerForAI: true };
     }
@@ -119,6 +129,11 @@ export default function Home() {
       // Pass an async function to updateGameState that calls performAction
       updateGameState(() => {
            console.log(`[handlePlayerAction] Calling performAction for ${action}...`);
+           // Ensure gameState is passed correctly
+           if (!gameState) {
+                console.error("[handlePlayerAction] Game state is null, cannot perform action.");
+                return Promise.resolve(null); // Return null or handle error state
+            }
            return performAction(gameState, humanPlayerId, action, targetId)
       });
   }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
@@ -132,6 +147,11 @@ export default function Home() {
        // Pass an async function to updateGameState that calls handlePlayerResponse
        updateGameState(() => {
             console.log(`[handlePlayerResponse] Calling handlePlayerResponse with ${response}...`);
+             // Ensure gameState is passed correctly
+            if (!gameState) {
+                console.error("[handlePlayerResponse] Game state is null, cannot handle response.");
+                return Promise.resolve(null); // Return null or handle error state
+            }
             return handlePlayerResponse(gameState, humanPlayerId, response)
        });
   }, [gameState, humanPlayerId, updateGameState, isProcessing]);
@@ -145,6 +165,11 @@ export default function Home() {
        // Pass an async function to updateGameState that calls handleExchangeSelection
       updateGameState(() => {
             console.log(`[handlePlayerExchange] Calling handleExchangeSelection...`);
+             // Ensure gameState is passed correctly
+             if (!gameState) {
+                console.error("[handlePlayerExchange] Game state is null, cannot handle exchange.");
+                return Promise.resolve(null); // Return null or handle error state
+             }
             return handleExchangeSelection(gameState, humanPlayerId, cardsToKeep)
       });
   }, [gameState, humanPlayerId, updateGameState, isProcessing]);
@@ -168,12 +193,22 @@ export default function Home() {
             console.warn(`[handleAIActionTrigger] Trigger blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, needsTrigger=${gameState?.needsHumanTriggerForAI}, winner=${!!gameState?.winner}`);
             return;
         }
-        console.log(`[handleAIActionTrigger] Triggering AI action for ${gameState.players[gameState.currentPlayerIndex].name}`);
+        const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+        if (!currentPlayer) {
+            console.error("[handleAIActionTrigger] Current player not found in game state.");
+            return;
+        }
+        console.log(`[handleAIActionTrigger] Triggering AI action for ${currentPlayer.name}`);
 
         // Update the state immediately to clear the flag and show processing state
         // Then, call the actual handleAIAction function.
         updateGameState(async () => {
             console.log(`[handleAIActionTrigger] Calling handleAIAction...`);
+             // Ensure gameState is passed correctly
+            if (!gameState) {
+                console.error("[handleAIActionTrigger] Game state is null, cannot trigger AI action.");
+                return Promise.resolve(null); // Return null or handle error state
+            }
              // Pass a state with the flag cleared to handleAIAction
             const stateForAI = { ...gameState, needsHumanTriggerForAI: false };
             return handleAIAction(stateForAI);
@@ -229,6 +264,8 @@ export default function Home() {
     ); // Loading spinner
   }
 
+   const currentPlayer = gameState.players[gameState.currentPlayerIndex];
+
   return (
     <main className="min-h-screen bg-background py-8">
       <h1 className="text-3xl font-bold text-center mb-6 text-primary">Coup Duel</h1>
@@ -241,11 +278,11 @@ export default function Home() {
         onForceReveal={handleForceReveal} // Pass the handler
       />
        {/* Button to trigger AI turn */}
-       {gameState.needsHumanTriggerForAI && !gameState.winner && (
+       {gameState.needsHumanTriggerForAI && !gameState.winner && currentPlayer && (
            <div className="text-center mt-4">
                <Button onClick={handleAIActionTrigger} disabled={isProcessing}>
                     {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Next AI Turn ({gameState.players[gameState.currentPlayerIndex].name})
+                    Next AI Turn ({currentPlayer.name})
                 </Button>
            </div>
        )}
@@ -260,3 +297,4 @@ export default function Home() {
     </main>
   );
 }
+
