@@ -28,6 +28,7 @@ const AIActionSelectionInputSchema = z.object({
     .array(z.string())
     .describe('The actions the AI player can currently take (e.g., Income, Foreign Aid, Coup). Must choose one of these.'), // Emphasize choosing from this list
   gameState: z.string().describe('A description of the current game state, including action log summary.'),
+  rulebook: z.string().optional().describe('Reference text of the Coup rulebook.'), // Add rulebook to input
 });
 export type AIActionSelectionInput = z.infer<typeof AIActionSelectionInputSchema>;
 
@@ -53,7 +54,7 @@ You are an AI player in the card game Coup. Your goal is to be the last player w
 Analyze the current game state, your resources, your hidden cards, and opponent information to select the strategically best action from the list of currently available actions.
 
 **Rules Reference:**
-${coupRulebook}
+{{{rulebook}}}
 
 **Your Current Situation:**
 - Money: {{playerMoney}}
@@ -65,7 +66,7 @@ ${coupRulebook}
 {{/each}}
 
 **Current Game State Summary:**
-{{gameState}}
+{{{gameState}}}
 
 **Available Actions You Can Take Right Now:**
 [{{#each availableActions}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}]
@@ -86,6 +87,13 @@ Output Format (JSON):
 `,
 });
 
+// --- Logging after prompt definition ---
+console.log("[aiActionSelectionFlow] Logging selectActionPrompt object immediately after definition:");
+console.log(`[aiActionSelectionFlow] typeof selectActionPrompt: ${typeof selectActionPrompt}`);
+console.log(`[aiActionSelectionFlow] selectActionPrompt keys: ${selectActionPrompt ? Object.keys(selectActionPrompt).join(', ') : 'null/undefined'}`);
+console.log(`[aiActionSelectionFlow] typeof selectActionPrompt.generate: ${typeof selectActionPrompt?.generate}`);
+// --- End Logging ---
+
 
 // Define the flow using the loaded prompt
 const aiActionSelectionFlow = ai.defineFlow<
@@ -102,18 +110,23 @@ const aiActionSelectionFlow = ai.defineFlow<
     let output: AIActionSelectionOutput | null = null;
     try {
         console.log("[aiActionSelectionFlow] Input received:", JSON.stringify(input, null, 2));
-        console.log("[aiActionSelectionFlow] Checking selectActionPrompt object:", typeof selectActionPrompt);
+        console.log("[aiActionSelectionFlow] Checking selectActionPrompt object inside flow:", typeof selectActionPrompt);
 
-        if (typeof selectActionPrompt?.generate !== 'function') {
-            console.error("[aiActionSelectionFlow] CRITICAL ERROR: selectActionPrompt.generate is NOT a function! Prompt definition might have failed.");
-            console.error("[aiActionSelectionFlow] selectActionPrompt value:", selectActionPrompt);
-            throw new Error("Internal Server Error: AI prompt definition failed.");
+        if (typeof selectActionPrompt !== 'function' || typeof selectActionPrompt?.generate !== 'function') {
+             console.error("[aiActionSelectionFlow] CRITICAL ERROR: selectActionPrompt.generate is NOT a function! Prompt definition might have failed.");
+             console.error("[aiActionSelectionFlow] selectActionPrompt value:", selectActionPrompt);
+             // Capture more details about the prompt object if it exists but lacks generate
+             if(selectActionPrompt) {
+                console.error("[aiActionSelectionFlow] selectActionPrompt keys inside error check:", Object.keys(selectActionPrompt).join(', '));
+             }
+            throw new Error("Internal Server Error: AI prompt definition failed."); // More specific error
         }
 
         console.log("[aiActionSelectionFlow] Calling selectActionPrompt.generate...");
+        // Pass input directly to the prompt function, as definePrompt wraps generate
         llmResponse = await selectActionPrompt.generate({ input });
         console.log("[aiActionSelectionFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
-        console.log("[aiActionSelectionFlow] LLM Raw Text:", llmResponse.text);
+        // console.log("[aiActionSelectionFlow] LLM Raw Text:", llmResponse.text); // Less verbose logging
 
         output = llmResponse.output;
 
@@ -150,10 +163,11 @@ const aiActionSelectionFlow = ai.defineFlow<
               }
 
         } else {
-            // Ensure no target is provided if action doesn't need one
+            // Ensure no target is provided if action *does* need one (and targets exist)
              const actionsNeedingTarget: string[] = ['Coup', 'Assassinate', 'Steal'];
-             if (actionsNeedingTarget.includes(validatedOutput.action)) {
-                  console.error(`AI Action Selection Error: Action "${validatedOutput.action}" requires a target, but none was provided.`);
+             const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
+             if (actionsNeedingTarget.includes(validatedOutput.action) && activeOpponents.length > 0) {
+                  console.error(`AI Action Selection Error: Action "${validatedOutput.action}" requires a target, but none was provided and targets exist.`);
                  throw new Error(`Action "${validatedOutput.action}" requires a target.`);
              }
         }
@@ -164,8 +178,10 @@ const aiActionSelectionFlow = ai.defineFlow<
 
     } catch (e: any) {
         const errorMessage = e instanceof Error ? e.message : String(e);
-        console.error("AI Action Selection Error:", errorMessage);
-        console.error("Error Details:", e);
+         const errorStack = e instanceof Error ? e.stack : 'No stack available';
+         console.error("AI Action Selection Error:", errorMessage);
+         console.error("Error Stack:", errorStack); // Log stack trace
+         console.error("Error Details:", e); // Log the full error object
         console.error("Input Sent to AI:", JSON.stringify(input, null, 2));
         if (output) {
              console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
@@ -176,31 +192,32 @@ const aiActionSelectionFlow = ai.defineFlow<
         }
         // Fallback: Default to Income, as it's always safe and available (unless must Coup and cannot)
         let fallbackAction: string = 'Income';
+        let fallbackTarget: string | undefined = undefined;
+        let fallbackReasoning = `AI generation/parsing/validation failed: ${errorMessage}.`;
+
          if (input.playerMoney >= 10 && input.availableActions.includes('Coup')) {
             // Must coup if possible
             fallbackAction = 'Coup';
             // Try to pick a random target if must Coup
              const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
-            const fallbackTarget = activeOpponents.length > 0 ? activeOpponents[Math.floor(Math.random() * activeOpponents.length)].name : undefined;
+             fallbackTarget = activeOpponents.length > 0 ? activeOpponents[Math.floor(Math.random() * activeOpponents.length)].name : undefined;
+             fallbackReasoning += ` Must Coup, fallback target selected.`;
             console.warn(`AI Action Selection Fallback: Must Coup, targeting random opponent ${fallbackTarget || 'N/A'} due to error: ${errorMessage}`);
-            return {
-                action: fallbackAction,
-                target: fallbackTarget,
-                reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Must Coup, fallback target selected.`,
-            };
          } else if (input.playerMoney >= 10 && !input.availableActions.includes('Coup')) {
              // Must Coup but cannot (no targets). Default to Income.
              console.warn(`AI Action Selection Fallback: Must Coup, but no targets available. Defaulting to Income due to error: ${errorMessage}`);
              fallbackAction = 'Income';
+             fallbackReasoning += ` Must Coup but no targets. Defaulting to ${fallbackAction}.`;
          } else {
               // Default to Income
               console.warn(`AI Action Selection Fallback: Defaulting to Income due to error: ${errorMessage}`);
+              fallbackReasoning += ` Defaulting to ${fallbackAction}.`;
          }
 
          return {
              action: fallbackAction,
-             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Raw output might be logged above. Defaulting to ${fallbackAction}.`,
-             target: undefined,
+             reasoning: fallbackReasoning,
+             target: fallbackTarget,
          };
     }
   }
@@ -210,30 +227,35 @@ const aiActionSelectionFlow = ai.defineFlow<
 export async function selectAction(input: AIActionSelectionInput): Promise<AIActionSelectionOutput> {
   console.log("AI Selecting Action with input:", JSON.stringify(input, null, 2));
   try {
-      const result = await aiActionSelectionFlow(input);
+      // Add rulebook content dynamically to the input for the flow
+      const flowInput = { ...input, rulebook: coupRulebook };
+      const result = await aiActionSelectionFlow(flowInput);
       console.log("AI Action selected:", result);
       return result;
   } catch (error: any) {
        const errorMessage = error instanceof Error ? error.message : String(error);
-       console.error("Error executing aiActionSelectionFlow:", error);
+       const errorStack = error instanceof Error ? error.stack : 'No stack available';
+       console.error("Error executing aiActionSelectionFlow:", errorMessage);
+       console.error("Flow Execution Error Stack:", errorStack); // Log stack trace of flow execution error
         // Fallback: Default to Income, as it's always safe and available (unless must Coup and cannot)
         let fallbackAction: string = 'Income';
         let fallbackTarget: string | undefined = undefined;
-        let fallbackReasoning = `An unexpected error occurred during AI action selection flow execution: ${errorMessage}. Defaulting to ${fallbackAction}.`;
+        let fallbackReasoning = `An unexpected error occurred during AI action selection flow execution: ${errorMessage}.`;
 
          if (input.playerMoney >= 10 && input.availableActions.includes('Coup')) {
             // Must coup if possible
             fallbackAction = 'Coup';
             const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
             fallbackTarget = activeOpponents.length > 0 ? activeOpponents[Math.floor(Math.random() * activeOpponents.length)].name : undefined;
-            fallbackReasoning = `An unexpected error occurred during AI action selection flow execution: ${errorMessage}. Must Coup, fallback target selected.`;
+            fallbackReasoning += ` Must Coup, fallback target selected.`;
             console.warn(`AI Action Selection Fallback (Flow Execution): Must Coup, targeting random opponent ${fallbackTarget || 'N/A'} due to error: ${errorMessage}`);
          } else if (input.playerMoney >= 10 && !input.availableActions.includes('Coup')) {
              console.warn(`AI Action Selection Fallback (Flow Execution): Must Coup, but no targets available. Defaulting to Income due to error: ${errorMessage}`);
              fallbackAction = 'Income';
-             fallbackReasoning = `An unexpected error occurred during AI action selection flow execution: ${errorMessage}. Must Coup but no targets. Defaulting to ${fallbackAction}.`;
+             fallbackReasoning += ` Must Coup but no targets. Defaulting to ${fallbackAction}.`;
          } else {
             console.warn(`AI Action Selection Fallback (Flow Execution): Defaulting to Income due to error: ${errorMessage}`);
+             fallbackReasoning += ` Defaulting to ${fallbackAction}.`;
          }
 
        return {

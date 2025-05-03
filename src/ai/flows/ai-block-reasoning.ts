@@ -29,6 +29,7 @@ const AIBlockReasoningInputSchema = z.object({
   gameState: z
     .string()
     .describe('The current state of the game, as a descriptive summary including all players money and revealed cards, and recent action log summary.'),
+    rulebook: z.string().optional().describe('Reference text of the Coup rulebook.'), // Add rulebook to input
 });
 export type AIBlockReasoningInput = z.infer<typeof AIBlockReasoningInputSchema>;
 
@@ -54,7 +55,7 @@ const blockReasoningPrompt = ai.definePrompt({
 You are an AI player in the card game Coup. An opponent has performed an action that you might be able to block. Decide whether you should attempt to block it.
 
 **Rules Reference:**
-${coupRulebook}
+{{{rulebook}}}
 
 **Action Being Performed:**
 - Action: {{action}}
@@ -66,7 +67,7 @@ ${coupRulebook}
 - Your Money: {{aiPlayerMoney}}
 
 **Current Game State Summary:**
-{{gameState}}
+{{{gameState}}}
 
 **Your Task:**
 Decide whether to block the opponent's action.
@@ -85,6 +86,13 @@ Output Format (JSON):
 `,
 });
 
+// --- Logging after prompt definition ---
+console.log("[aiBlockReasoningFlow] Logging blockReasoningPrompt object immediately after definition:");
+console.log(`[aiBlockReasoningFlow] typeof blockReasoningPrompt: ${typeof blockReasoningPrompt}`);
+console.log(`[aiBlockReasoningFlow] blockReasoningPrompt keys: ${blockReasoningPrompt ? Object.keys(blockReasoningPrompt).join(', ') : 'null/undefined'}`);
+console.log(`[aiBlockReasoningFlow] typeof blockReasoningPrompt.generate: ${typeof blockReasoningPrompt?.generate}`);
+// --- End Logging ---
+
 
 // Define the flow using the loaded prompt
 const aiBlockReasoningFlow = ai.defineFlow<
@@ -101,17 +109,22 @@ const aiBlockReasoningFlow = ai.defineFlow<
      let output: AIBlockReasoningOutput | null = null;
      try {
          console.log("[aiBlockReasoningFlow] Input received:", JSON.stringify(input, null, 2));
-         console.log("[aiBlockReasoningFlow] Checking blockReasoningPrompt object:", typeof blockReasoningPrompt);
+         console.log("[aiBlockReasoningFlow] Checking blockReasoningPrompt object inside flow:", typeof blockReasoningPrompt);
 
-        if (typeof blockReasoningPrompt?.generate !== 'function') {
-            console.error("[aiBlockReasoningFlow] CRITICAL ERROR: blockReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
-            console.error("[aiBlockReasoningFlow] blockReasoningPrompt value:", blockReasoningPrompt);
+        if (typeof blockReasoningPrompt !== 'function' || typeof blockReasoningPrompt?.generate !== 'function') {
+             console.error("[aiBlockReasoningFlow] CRITICAL ERROR: blockReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
+             console.error("[aiBlockReasoningFlow] blockReasoningPrompt value:", blockReasoningPrompt);
+             // Capture more details about the prompt object if it exists but lacks generate
+             if(blockReasoningPrompt) {
+                console.error("[aiBlockReasoningFlow] blockReasoningPrompt keys inside error check:", Object.keys(blockReasoningPrompt).join(', '));
+             }
             throw new Error("Internal Server Error: AI prompt definition failed.");
         }
          console.log("[aiBlockReasoningFlow] Calling blockReasoningPrompt.generate...");
+         // Pass input directly to the prompt function
          llmResponse = await blockReasoningPrompt.generate({ input });
           console.log("[aiBlockReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
-          console.log("[aiBlockReasoningFlow] LLM Raw Text:", llmResponse.text);
+          // console.log("[aiBlockReasoningFlow] LLM Raw Text:", llmResponse.text);
 
 
          output = llmResponse.output;
@@ -132,8 +145,10 @@ const aiBlockReasoningFlow = ai.defineFlow<
 
      } catch (e: any) {
           const errorMessage = e instanceof Error ? e.message : String(e);
+          const errorStack = e instanceof Error ? e.stack : 'No stack available';
           console.error("AI Block Reasoning Error:", errorMessage);
-          console.error("Error Details:", e);
+          console.error("Error Stack:", errorStack); // Log stack trace
+          console.error("Error Details:", e); // Log the full error object
           console.error("Input Sent to AI:", JSON.stringify(input, null, 2));
         if (output) {
              console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
@@ -146,7 +161,7 @@ const aiBlockReasoningFlow = ai.defineFlow<
          console.warn(`AI Block Reasoning Fallback: Defaulting to not blocking due to error: ${errorMessage}`);
          return {
              shouldBlock: false, // Safer default
-             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Raw output might be logged above. Defaulting to not blocking.`,
+             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Defaulting to not blocking.`,
          };
      }
   }
@@ -158,6 +173,7 @@ export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AI
    const mappedInput = {
        ...input,
        aiPlayerInfluenceCards: input.aiPlayerInfluenceCards || [],
+       rulebook: coupRulebook, // Add rulebook
    };
    try {
        const result = await aiBlockReasoningFlow(mappedInput);
@@ -165,7 +181,9 @@ export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AI
        return result;
    } catch (error: any) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error("Error executing aiBlockReasoningFlow:", error);
+        const errorStack = error instanceof Error ? error.stack : 'No stack available';
+        console.error("Error executing aiBlockReasoningFlow:", errorMessage);
+        console.error("Flow Execution Error Stack:", errorStack); // Log stack trace
         console.warn(`AI Block Reasoning Fallback (Flow Execution): Defaulting to not blocking due to error: ${errorMessage}`);
         return {
             shouldBlock: false, // Safer default

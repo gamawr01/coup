@@ -23,6 +23,7 @@ const AiChallengeReasoningInputSchema = z.object({
   opponentInfluenceCount: z.number().describe('The number of *unrevealed* influence cards the player performing the action/block has.'),
   opponentMoney: z.number().describe('The amount of money the opponent performing the action/block has.'),
   gameState: z.string().describe('A summary of the current game state including all players money and revealed cards, and recent action log summary.'),
+  rulebook: z.string().optional().describe('Reference text of the Coup rulebook.'), // Add rulebook to input
 });
 export type AiChallengeReasoningInput = z.infer<typeof AiChallengeReasoningInputSchema>;
 
@@ -45,7 +46,7 @@ const challengeReasoningPrompt = ai.definePrompt({
 You are an AI player in the card game Coup. An opponent has declared an action or a block that you can potentially challenge. Decide whether you should challenge their claim.
 
 **Rules Reference:**
-${coupRulebook}
+{{{rulebook}}}
 
 **Claim Being Made:**
 - Action or Block: {{actionOrBlock}}
@@ -59,7 +60,7 @@ ${coupRulebook}
 - Your Unrevealed Influence: [{{#each aiInfluenceCards}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}]
 
 **Current Game State Summary:**
-{{gameState}}
+{{{gameState}}}
 
 **Your Task:**
 Decide whether to challenge the opponent's claim (that they possess the necessary influence card for the declared {{actionOrBlock}}).
@@ -77,6 +78,13 @@ Output Format (JSON):
 `,
 });
 
+// --- Logging after prompt definition ---
+console.log("[aiChallengeReasoningFlow] Logging challengeReasoningPrompt object immediately after definition:");
+console.log(`[aiChallengeReasoningFlow] typeof challengeReasoningPrompt: ${typeof challengeReasoningPrompt}`);
+console.log(`[aiChallengeReasoningFlow] challengeReasoningPrompt keys: ${challengeReasoningPrompt ? Object.keys(challengeReasoningPrompt).join(', ') : 'null/undefined'}`);
+console.log(`[aiChallengeReasoningFlow] typeof challengeReasoningPrompt.generate: ${typeof challengeReasoningPrompt?.generate}`);
+// --- End Logging ---
+
 
 // Define the flow using the loaded prompt
 const aiChallengeReasoningFlow = ai.defineFlow<
@@ -93,17 +101,22 @@ const aiChallengeReasoningFlow = ai.defineFlow<
     let output: AiChallengeReasoningOutput | null = null;
      try {
          console.log("[aiChallengeReasoningFlow] Input received:", JSON.stringify(input, null, 2));
-         console.log("[aiChallengeReasoningFlow] Checking challengeReasoningPrompt object:", typeof challengeReasoningPrompt);
+         console.log("[aiChallengeReasoningFlow] Checking challengeReasoningPrompt object inside flow:", typeof challengeReasoningPrompt);
 
-         if (typeof challengeReasoningPrompt?.generate !== 'function') {
+         if (typeof challengeReasoningPrompt !== 'function' || typeof challengeReasoningPrompt?.generate !== 'function') {
             console.error("[aiChallengeReasoningFlow] CRITICAL ERROR: challengeReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
-            console.error("[aiChallengeReasoningFlow] challengeReasoningPrompt value:", challengeReasoningPrompt);
+             console.error("[aiChallengeReasoningFlow] challengeReasoningPrompt value:", challengeReasoningPrompt);
+             // Capture more details about the prompt object if it exists but lacks generate
+             if(challengeReasoningPrompt) {
+                 console.error("[aiChallengeReasoningFlow] challengeReasoningPrompt keys inside error check:", Object.keys(challengeReasoningPrompt).join(', '));
+             }
             throw new Error("Internal Server Error: AI prompt definition failed.");
          }
           console.log("[aiChallengeReasoningFlow] Calling challengeReasoningPrompt.generate...");
+        // Pass input directly to the prompt function
         llmResponse = await challengeReasoningPrompt.generate({ input });
          console.log("[aiChallengeReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
-         console.log("[aiChallengeReasoningFlow] LLM Raw Text:", llmResponse.text);
+         // console.log("[aiChallengeReasoningFlow] LLM Raw Text:", llmResponse.text);
 
 
         output = llmResponse.output;
@@ -124,8 +137,10 @@ const aiChallengeReasoningFlow = ai.defineFlow<
 
      } catch (e: any) {
          const errorMessage = e instanceof Error ? e.message : String(e);
-         console.error("AI Challenge Reasoning Error:", errorMessage);
-         console.error("Error Details:", e);
+          const errorStack = e instanceof Error ? e.stack : 'No stack available';
+          console.error("AI Challenge Reasoning Error:", errorMessage);
+          console.error("Error Stack:", errorStack); // Log stack trace
+          console.error("Error Details:", e); // Log the full error object
          console.error("Input Sent to AI:", JSON.stringify(input, null, 2));
         if (output) {
              console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
@@ -138,7 +153,7 @@ const aiChallengeReasoningFlow = ai.defineFlow<
          console.warn(`AI Challenge Reasoning Fallback: Defaulting to not challenging due to error: ${errorMessage}`);
          return {
              shouldChallenge: false, // Safer default
-             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Raw output might be logged above. Defaulting to not challenging.`,
+             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Defaulting to not challenging.`,
          };
      }
   }
@@ -146,13 +161,17 @@ const aiChallengeReasoningFlow = ai.defineFlow<
 
 export async function aiChallengeReasoning(input: AiChallengeReasoningInput): Promise<AiChallengeReasoningOutput> {
     console.log("AI Challenge Reasoning with input:", JSON.stringify(input, null, 2));
+     // Add rulebook content dynamically to the input for the flow
+     const flowInput = { ...input, rulebook: coupRulebook };
     try {
-        const result = await aiChallengeReasoningFlow(input);
+        const result = await aiChallengeReasoningFlow(flowInput);
         console.log("AI Challenge decision:", result);
         return result;
     } catch (error: any) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error("Error executing aiChallengeReasoningFlow:", error);
+        const errorStack = error instanceof Error ? error.stack : 'No stack available';
+        console.error("Error executing aiChallengeReasoningFlow:", errorMessage);
+         console.error("Flow Execution Error Stack:", errorStack); // Log stack trace
         console.warn(`AI Challenge Reasoning Fallback (Flow Execution): Defaulting to not challenging due to error: ${errorMessage}`);
         // Fallback in case the flow itself throws an unexpected error
         return {
