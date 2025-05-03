@@ -86,14 +86,6 @@ Output Format (JSON):
 `,
 });
 
-// --- Logging after prompt definition ---
-console.log("[aiBlockReasoningFlow] Logging blockReasoningPrompt object immediately after definition:");
-console.log(`[aiBlockReasoningFlow] typeof blockReasoningPrompt: ${typeof blockReasoningPrompt}`);
-console.log(`[aiBlockReasoningFlow] blockReasoningPrompt keys: ${blockReasoningPrompt ? Object.keys(blockReasoningPrompt).join(', ') : 'null/undefined'}`);
-console.log(`[aiBlockReasoningFlow] typeof blockReasoningPrompt.generate: ${typeof blockReasoningPrompt?.generate}`);
-// --- End Logging ---
-
-
 // Define the flow using the loaded prompt
 const aiBlockReasoningFlow = ai.defineFlow<
   typeof AIBlockReasoningInputSchema,
@@ -109,37 +101,42 @@ const aiBlockReasoningFlow = ai.defineFlow<
      let output: AIBlockReasoningOutput | null = null;
      try {
          console.log("[aiBlockReasoningFlow] Input received:", JSON.stringify(input, null, 2));
-         console.log("[aiBlockReasoningFlow] Checking blockReasoningPrompt object inside flow:", typeof blockReasoningPrompt);
 
-        if (typeof blockReasoningPrompt !== 'function' || typeof blockReasoningPrompt?.generate !== 'function') {
-             console.error("[aiBlockReasoningFlow] CRITICAL ERROR: blockReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
-             console.error("[aiBlockReasoningFlow] blockReasoningPrompt value:", blockReasoningPrompt);
-             // Capture more details about the prompt object if it exists but lacks generate
-             if(blockReasoningPrompt) {
-                console.error("[aiBlockReasoningFlow] blockReasoningPrompt keys inside error check:", Object.keys(blockReasoningPrompt).join(', '));
-             }
-            throw new Error("Internal Server Error: AI prompt definition failed.");
-        }
-         console.log("[aiBlockReasoningFlow] Calling blockReasoningPrompt.generate...");
-         // Pass input directly to the prompt function
-         llmResponse = await blockReasoningPrompt.generate({ input });
-          console.log("[aiBlockReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
-          // console.log("[aiBlockReasoningFlow] LLM Raw Text:", llmResponse.text);
+         // Correct Genkit v1.x invocation: call the prompt object directly
+        console.log("[aiBlockReasoningFlow] Calling blockReasoningPrompt...");
+        llmResponse = await blockReasoningPrompt(input);
+        console.log("[aiBlockReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
+        // console.log("[aiBlockReasoningFlow] LLM Raw Text:", llmResponse.text);
 
-
-         output = llmResponse.output;
+         output = llmResponse.output; // Genkit attempts parsing
 
         if (!output) {
-             console.error("AI Block Reasoning Error: LLM response did not contain structured output.");
-             console.error("LLM Raw Text Response:", llmResponse.text);
-             console.error("LLM Finish Reason:", llmResponse.finishReason);
-             console.error("LLM Usage Data:", llmResponse.usage);
-            throw new Error("LLM response did not contain structured output.");
+            console.error("AI Block Reasoning Error: LLM response did not contain valid structured output (output is null/undefined).");
+            console.error("LLM Raw Text Response:", llmResponse?.text);
+            console.error("LLM Finish Reason:", llmResponse?.finishReason);
+             // Attempt manual parse as fallback
+             try {
+                if (llmResponse?.text) {
+                     output = JSON.parse(llmResponse.text) as AIBlockReasoningOutput;
+                     console.log("[aiBlockReasoningFlow] Manual JSON parse successful:", output);
+                     output = AIBlockReasoningOutputSchema.parse(output); // Validate manual parse
+                     console.log("[aiBlockReasoningFlow] Manual parse validated.");
+                } else {
+                    throw new Error("LLM response text was empty.");
+                }
+             } catch(parseError: any) {
+                console.error("AI Block Reasoning Error: Manual JSON parse/validation failed.", parseError?.message);
+                throw new Error(`LLM response could not be parsed as valid JSON matching the schema. Raw text: ${llmResponse?.text}`);
+             }
         }
-         console.log("[aiBlockReasoningFlow] Raw output from LLM:", JSON.stringify(output, null, 2));
 
-         // Validate output
-         const validatedOutput = AIBlockReasoningOutputSchema.parse(output);
+         // Validate output (even if parsed by Genkit, ensure boolean is present)
+         if (typeof output.shouldBlock !== 'boolean') {
+             console.error("AI Block Reasoning Error: Parsed output missing 'shouldBlock' boolean.");
+             throw new Error("Parsed output missing 'shouldBlock' boolean.");
+         }
+         const validatedOutput = output; // Use the parsed/validated output
+
           console.log("AI Block Reasoning Flow: Successfully generated and validated output:", validatedOutput);
           return validatedOutput;
 
@@ -173,10 +170,10 @@ export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AI
    const mappedInput = {
        ...input,
        aiPlayerInfluenceCards: input.aiPlayerInfluenceCards || [],
-       rulebook: coupRulebook, // Add rulebook
+       rulebook: input.rulebook ?? coupRulebook, // Add rulebook if not present
    };
    try {
-       const result = await aiBlockReasoningFlow(mappedInput);
+       const result = await aiBlockReasoningFlow(mappedInput); // Await the flow
        console.log("AI Block decision:", result);
        return result;
    } catch (error: any) {

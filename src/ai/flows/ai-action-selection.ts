@@ -40,7 +40,7 @@ const AIActionSelectionOutputSchema = z.object({
 export type AIActionSelectionOutput = z.infer<typeof AIActionSelectionOutputSchema>;
 
 
-// Define the prompt inline
+// Define the prompt inline, as a prompt, not a function
 const selectActionPrompt = ai.definePrompt(
     {
         name: 'selectActionPrompt',
@@ -50,9 +50,8 @@ const selectActionPrompt = ai.definePrompt(
         response: {
             format: 'json', // Request JSON output
         },
-        prompt: `
-You are an AI player in the card game Coup. Your goal is to be the last player with influence remaining.
-Analyze the current game state, your resources, your hidden cards, and opponent information to select the strategically best action from the list of currently available actions.
+        prompt: `You are an AI player in the card game Coup. Your goal is to be the last player with influence remaining.
+Analyze the current game state, your resources, your hidden cards, and opponent information to select the best strategic action from the currently available actions list.
 
 **Rules Reference:**
 {{{rulebook}}}
@@ -73,124 +72,100 @@ Analyze the current game state, your resources, your hidden cards, and opponent 
 [{{#each availableActions}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}]
 
 **Your Task:**
-Choose the best action from the "Available Actions" list.
+Choose the *single best* action from the "Available Actions" list.
 - Consider short-term gains (money) and long-term strategy (eliminating opponents, bluffing potential).
-- If an action requires a target (Coup, Assassinate, Steal), choose the best opponent target based on their influence, money, and potential threats. Ensure the target name exactly matches one from the Opponent Information list. If multiple targets are equally viable, choose randomly among them.
+- If an action requires a target (Coup, Assassinate, Steal), choose the best opponent target based on their influence, money, and potential threat. Ensure the target name *exactly* matches one from the Opponent Information list. If multiple targets are equally viable, choose one.
 - Provide your reasoning, explaining why you chose this action (and target, if applicable) over others.
-- **CRITICAL:** Your output *must* be a valid JSON object matching the defined output schema. The 'action' field *must* be one of the strings from the 'availableActions' input array.
+- **CRITICAL:** Your output *must* be a valid JSON object matching the defined output schema. The 'action' field *must* be exactly one of the strings from the 'availableActions' input array. If the action requires a target, the 'target' field must be the exact name of an opponent from the 'opponentInfo' list.
 
 Output Format (JSON):
 {
-  "action": "Selected action (must be from availableActions)",
-  "target": "Target player name (optional, required for Coup/Assassinate/Steal, must be from opponentInfo)",
+  "action": "Selected action (must be in availableActions)",
+  "target": "Target player name (optional, required for Coup/Assassinate/Steal, must be in opponentInfo)",
   "reasoning": "Your detailed thought process for this decision."
 }
 `,
     },
-   // Add prompt function immediately - This is crucial for Genkit v1.x
-   async (input) => {
-       console.log("[selectActionPrompt function] Prompt function called with input:", input);
-       // This function *is* the generate call now in Genkit v1.x
-       // No need to call .generate() separately on the prompt object itself.
-       // The framework handles the LLM call based on the prompt definition.
-       // The return structure is automatically handled by Genkit if response format is JSON.
-       // If we needed manipulation *before* the LLM call, it would go here.
-       // If we needed manipulation *after* the LLM call (before returning), we'd need a flow.
-       // Since this is directly used in a flow, we let the flow handle input/output.
-        return; // No explicit return needed here, Genkit handles it based on config.
-    }
 );
 
-
-// Define the flow using the prompt
-const aiActionSelectionFlow = ai.defineFlow<
-  typeof AIActionSelectionInputSchema,
-  typeof AIActionSelectionOutputSchema
->(
-  {
+// Define the flow
+const aiActionSelectionFlow = ai.defineFlow({
     name: 'aiActionSelectionFlow',
     inputSchema: AIActionSelectionInputSchema,
     outputSchema: AIActionSelectionOutputSchema,
-  },
-  async (input) => {
-    let llmResponse: GenerateResponse<z.infer<typeof AIActionSelectionOutputSchema>> | null = null;
+}, async (input) => {
+    let llmResponse: GenerateResponse<AIActionSelectionOutput> | null = null;
     let output: AIActionSelectionOutput | null = null;
+
     try {
-        console.log("[aiActionSelectionFlow] Input received:", JSON.stringify(input, null, 2));
+        console.log("[aiActionSelectionFlow] Input for LLM:", JSON.stringify(input, null, 2));
 
-        // === Enhanced Logging Start ===
-        console.log("[aiActionSelectionFlow] --- Debugging Prompt Object ---");
-        console.log("[aiActionSelectionFlow] typeof selectActionPrompt:", typeof selectActionPrompt);
-        if (selectActionPrompt) {
-            console.log("[aiActionSelectionFlow] selectActionPrompt keys:", Object.keys(selectActionPrompt).join(', '));
-            console.log("[aiActionSelectionFlow] selectActionPrompt itself:", selectActionPrompt); // Log the function object itself
-            // Check if it's a function as expected in Genkit v1.x flow definition
-            if (typeof selectActionPrompt === 'function') {
-                 console.log("[aiActionSelectionFlow] selectActionPrompt IS a function. Correct for Genkit v1.x flow.");
-            } else {
-                 console.error("[aiActionSelectionFlow] CRITICAL ERROR: selectActionPrompt is NOT a function!");
-            }
-        } else {
-            console.error("[aiActionSelectionFlow] CRITICAL ERROR: selectActionPrompt is null or undefined!");
-        }
-        console.log("[aiActionSelectionFlow] --- End Debugging Prompt Object ---");
-        // === Enhanced Logging End ===
-
-
-        // In Genkit v1.x, the defined prompt *is* the function to call.
-        console.log("[aiActionSelectionFlow] Calling the selectActionPrompt function (which triggers generation)...");
-        // The flow passes the input to the prompt function directly.
-        // The prompt definition itself handles the generation.
-        llmResponse = await selectActionPrompt.generate({ input }); // CORRECT: Use generate method on the prompt *object*
-
+        // Correct Genkit v1.x invocation: call the prompt object directly
+        console.log("[aiActionSelectionFlow] Calling selectActionPrompt...");
+        llmResponse = await selectActionPrompt(input);
         console.log("[aiActionSelectionFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
+        // console.log("[aiActionSelectionFlow] Raw Text Response from LLM:", llmResponse.text); // Uncomment for deep debug
 
-        output = llmResponse.output;
+        output = llmResponse.output; // Genkit attempts parsing based on outputSchema and format: 'json'
 
         if (!output) {
-            console.error("AI Action Selection Error: LLM response did not contain structured output (output was null/undefined).");
-            console.error("LLM Raw Text Response:", llmResponse.text);
-            console.error("LLM Finish Reason:", llmResponse.finishReason);
-            console.error("LLM Usage Data:", llmResponse.usage);
-            throw new Error("LLM response did not contain structured output.");
+            console.error("AI Action Selection Error: LLM response did not contain valid structured output (output is null/undefined).");
+            console.error("LLM Raw Text Response:", llmResponse?.text); // Log raw text on failure
+            console.error("LLM Finish Reason:", llmResponse?.finishReason);
+             // Attempt to parse manually as a fallback (sometimes Genkit parsing might fail unexpectedly)
+             try {
+                if (llmResponse?.text) {
+                     output = JSON.parse(llmResponse.text) as AIActionSelectionOutput;
+                     console.log("[aiActionSelectionFlow] Manual JSON parse successful:", output);
+                     // Manually validate against schema if parsed manually
+                     output = AIActionSelectionOutputSchema.parse(output);
+                     console.log("[aiActionSelectionFlow] Manual parse validated.");
+                } else {
+                    throw new Error("LLM response text was empty.");
+                }
+             } catch(parseError: any) {
+                 console.error("AI Action Selection Error: Manual JSON parse/validation failed.", parseError?.message);
+                 throw new Error(`LLM response could not be parsed as valid JSON matching the schema. Raw text: ${llmResponse?.text}`);
+             }
         }
-        console.log("[aiActionSelectionFlow] Raw output from LLM:", JSON.stringify(output, null, 2));
 
-        // Validate output against schema
-        const validatedOutput = AIActionSelectionOutputSchema.parse(output);
+        // --- Validation ---
+        const validatedOutput = output; // Already parsed by Genkit or manually validated
 
-        // Additional validation: Ensure action is one of the available actions
+        if (!validatedOutput || validatedOutput.action === null || validatedOutput.action === undefined) {
+            console.error(`AI Action Selection Error: Chosen action is null or undefined after parsing.`);
+            throw new Error(`Chosen action is null or undefined.`);
+        }
+
         if (!input.availableActions.includes(validatedOutput.action)) {
-             console.error(`AI Action Selection Error: Chosen action "${validatedOutput.action}" is not in the available list: [${input.availableActions.join(', ')}]`);
-             // Attempt to find the closest valid action? For now, throw error.
-             throw new Error(`Chosen action "${validatedOutput.action}" is not available. Available: [${input.availableActions.join(', ')}]`);
+            console.error(`AI Action Selection Error: Chosen action "${validatedOutput.action}" is not in the available list: [${input.availableActions.join(', ')}]`);
+            // Attempt to find the closest valid action? For now, throw error.
+            throw new Error(`Chosen action "${validatedOutput.action}" is not available. Available: [${input.availableActions.join(', ')}]`);
         }
 
         // Additional validation: Ensure target is valid if provided
-        if (validatedOutput.target) {
-             const targetValid = input.opponentInfo.some(opp => opp.name === validatedOutput.target);
-             if (!targetValid) {
-                 console.error(`AI Action Selection Error: Target "${validatedOutput.target}" is not a valid opponent name. Valid: [${input.opponentInfo.map(o=>o.name).join(', ')}]`);
-                 // Attempt to pick a valid random target? For now, throw error.
-                 throw new Error(`Target "${validatedOutput.target}" is not valid.`);
-             }
-             // Ensure action actually requires a target
-             const actionsNeedingTarget: string[] = ['Coup', 'Assassinate', 'Steal'];
-              if (!actionsNeedingTarget.includes(validatedOutput.action)) {
-                  console.warn(`AI Action Selection Warning: Target "${validatedOutput.target}" provided for action "${validatedOutput.action}" which doesn't require one. Ignoring target.`);
-                  validatedOutput.target = undefined; // Clear the target
-              }
+        const actionsNeedingTarget: string[] = ['Coup', 'Assassinate', 'Steal'];
+        const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
 
+        if (validatedOutput.target) {
+            const targetValid = input.opponentInfo.some(opp => opp.name === validatedOutput.target);
+            if (!targetValid) {
+                console.error(`AI Action Selection Error: Target "${validatedOutput.target}" is not a valid opponent name. Valid: [${input.opponentInfo.map(o=>o.name).join(', ')}]`);
+                // Attempt to pick a valid random target? For now, throw error.
+                throw new Error(`Target "${validatedOutput.target}" is not valid.`);
+            }
+            // Ensure action actually requires a target
+            if (!actionsNeedingTarget.includes(validatedOutput.action)) {
+                console.warn(`AI Action Selection Warning: Target "${validatedOutput.target}" provided for action "${validatedOutput.action}" which doesn't require one. Ignoring target.`);
+                validatedOutput.target = undefined; // Clear the target
+            }
         } else {
             // Ensure no target is provided if action *does* need one (and targets exist)
-             const actionsNeedingTarget: string[] = ['Coup', 'Assassinate', 'Steal'];
-             const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
-             if (actionsNeedingTarget.includes(validatedOutput.action) && activeOpponents.length > 0) {
-                  console.error(`AI Action Selection Error: Action "${validatedOutput.action}" requires a target, but none was provided and targets exist.`);
-                 throw new Error(`Action "${validatedOutput.action}" requires a target.`);
-             }
+            if (actionsNeedingTarget.includes(validatedOutput.action) && activeOpponents.length > 0) {
+                 console.error(`AI Action Selection Error: Action "${validatedOutput.action}" requires a target, but none was provided and targets exist.`);
+                throw new Error(`Action "${validatedOutput.action}" requires a target.`);
+            }
         }
-
 
         console.log("AI Action Selection Flow: Successfully generated and validated output:", validatedOutput);
         return validatedOutput;
@@ -199,16 +174,16 @@ const aiActionSelectionFlow = ai.defineFlow<
         const errorMessage = e instanceof Error ? e.message : String(e);
          const errorStack = e instanceof Error ? e.stack : 'No stack available';
          console.error("AI Action Selection Error in Flow:", errorMessage);
-         console.error("Error Stack:", errorStack); // Log stack trace
-         console.error("Error Details:", e); // Log the full error object
-        console.error("Input Sent to AI:", JSON.stringify(input, null, 2));
+         console.error("Error Stack:", errorStack);
+         console.error("Input Sent to AI:", JSON.stringify(input, null, 2));
         if (output) {
-             console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
+            console.error("Parsed AI Output (before error):", JSON.stringify(output, null, 2));
         } else if (llmResponse) {
-             console.error("LLM Raw Text Response (on error):", llmResponse.text);
-             console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
-             console.error("LLM Usage Data (on error):", llmResponse.usage);
+            console.error("LLM Raw Text Response (on error):", llmResponse.text);
+            console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
+            console.error("LLM Usage Data (on error):", llmResponse.usage);
         }
+
         // Fallback: Default to Income, as it's always safe and available (unless must Coup and cannot)
         let fallbackAction: string = 'Income';
         let fallbackTarget: string | undefined = undefined;
@@ -217,21 +192,44 @@ const aiActionSelectionFlow = ai.defineFlow<
          // Must Coup logic in fallback
          if (input.playerMoney >= 10) {
              const canCoup = input.availableActions.includes('Coup');
-             const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
-             if (canCoup && activeOpponents.length > 0) {
+             const activeOpponentsForFallback = input.opponentInfo.filter(o => o.influenceCount > 0);
+             if (canCoup && activeOpponentsForFallback.length > 0) {
                 fallbackAction = 'Coup';
-                fallbackTarget = activeOpponents[Math.floor(Math.random() * activeOpponents.length)].name;
+                fallbackTarget = activeOpponentsForFallback[Math.floor(Math.random() * activeOpponentsForFallback.length)].name;
                  fallbackReasoning += ` Must Coup, fallback target selected.`;
                 console.warn(`AI Action Selection Fallback: Must Coup, targeting random opponent ${fallbackTarget} due to error: ${errorMessage}`);
-             } else if (!canCoup && activeOpponents.length > 0) {
+             } else if (!canCoup && activeOpponentsForFallback.length > 0) {
                  // Should not happen if logic is correct, but handle it
+                 fallbackAction = 'Income'; // Can't coup, so income is safest bet
                  console.warn(`AI Action Selection Fallback: Must Coup, but Coup not available? Defaulting to Income.`);
                  fallbackReasoning += ` Must Coup but action unavailable. Defaulting to ${fallbackAction}.`;
              } else { // Cannot Coup because no targets
+                  fallbackAction = 'Income'; // Can't coup, so income is safest bet
                  console.warn(`AI Action Selection Fallback: Must Coup, but no targets available. Defaulting to Income due to error: ${errorMessage}`);
                  fallbackReasoning += ` Must Coup but no targets. Defaulting to ${fallbackAction}.`;
              }
+         } else if (!input.availableActions.includes('Income')) {
+             // If Income somehow isn't available (e.g., must Coup was chosen above, but failed target check)
+             // Find *any* available action as a last resort
+             fallbackAction = input.availableActions[0] || 'Coup'; // Desperation fallback
+             fallbackReasoning += ` Defaulting to ${fallbackAction} as Income unavailable.`;
+             console.warn(`AI Action Selection Fallback: Income not available? Defaulting to ${fallbackAction} due to error: ${errorMessage}`);
+             // If this fallback needs a target, we might still fail later, but it's better than crashing
+             if (['Coup', 'Assassinate', 'Steal'].includes(fallbackAction)) {
+                  const activeOpponentsForFallback = input.opponentInfo.filter(o => o.influenceCount > 0);
+                  if(activeOpponentsForFallback.length > 0) {
+                     fallbackTarget = activeOpponentsForFallback[Math.floor(Math.random() * activeOpponentsForFallback.length)].name;
+                     fallbackReasoning += ` Selecting random target ${fallbackTarget}.`;
+                  } else {
+                       // If even the fallback action needs a target and there are none, we're stuck.
+                       // This case should be prevented by earlier logic.
+                       console.error(`AI Action Selection Fallback: Fallback action ${fallbackAction} needs target but none exist!`);
+                       // Let the game logic handle this impossible state?
+                  }
+             }
+
          } else {
+             // Default to Income is the standard fallback
              console.warn(`AI Action Selection Fallback: Defaulting to Income due to error: ${errorMessage}`);
               fallbackReasoning += ` Defaulting to ${fallbackAction}.`;
          }
@@ -240,26 +238,26 @@ const aiActionSelectionFlow = ai.defineFlow<
          return {
              action: fallbackAction,
              reasoning: fallbackReasoning,
-             target: fallbackTarget,
+             target: fallbackTarget
          };
     }
-  }
-);
+});
 
 
 export async function selectAction(input: AIActionSelectionInput): Promise<AIActionSelectionOutput> {
-  console.log("[selectAction Export] AI Selecting Action with input:", JSON.stringify(input, null, 2));
-  try {
-      // Add rulebook content dynamically to the input for the flow
-      const flowInput = { ...input, rulebook: coupRulebook };
-      const result = await aiActionSelectionFlow(flowInput); // Call the defined flow
-      console.log("[selectAction Export] AI Action selected:", result);
-      return result;
-  } catch (error: any) {
-       const errorMessage = error instanceof Error ? error.message : String(error);
-       const errorStack = error instanceof Error ? error.stack : 'No stack available';
-       console.error("[selectAction Export] Error executing aiActionSelectionFlow:", errorMessage);
-       console.error("[selectAction Export] Flow Execution Error Stack:", errorStack); // Log stack trace of flow execution error
+    console.log("[selectAction Export] AI Selecting Action with input:", JSON.stringify(input, null, 2));
+    try {
+        // Add rulebook dynamically if not already present (optional chaining just in case)
+        const flowInput = { ...input, rulebook: input.rulebook ?? coupRulebook };
+        // Call the defined flow with the input
+        const result = await aiActionSelectionFlow(flowInput); // Await the flow execution
+        console.log("[selectAction Export] AI Action selected:", result);
+        return result;
+    } catch (error: any) {
+         const errorMessage = error instanceof Error ? error.message : String(error);
+         const errorStack = error instanceof Error ? error.stack : 'No stack available';
+         console.error("[selectAction Export] Error executing aiActionSelectionFlow:", errorMessage);
+         console.error("[selectAction Export] Flow Execution Error Stack:", errorStack); // Log stack trace of flow execution error
 
         // Fallback logic duplicated here for safety, in case flow execution fails catastrophically
         let fallbackAction: string = 'Income';
@@ -275,10 +273,25 @@ export async function selectAction(input: AIActionSelectionInput): Promise<AIAct
                  fallbackReasoning += ` Must Coup, fallback target selected.`;
                  console.warn(`AI Action Selection Fallback (Flow Execution): Must Coup, targeting random opponent ${fallbackTarget} due to error: ${errorMessage}`);
              } else {
+                  fallbackAction = 'Income'; // Can't Coup (no targets or action unavailable)
                  console.warn(`AI Action Selection Fallback (Flow Execution): Must Coup, but cannot (unavailable or no targets). Defaulting to Income due to error: ${errorMessage}`);
                  fallbackReasoning += ` Must Coup but cannot perform. Defaulting to ${fallbackAction}.`;
              }
+         } else if (!input.availableActions.includes('Income')) {
+              fallbackAction = input.availableActions[0] || 'Coup'; // Desperation
+              fallbackReasoning += ` Defaulting to ${fallbackAction} as Income unavailable.`;
+              console.warn(`AI Action Selection Fallback (Flow Execution): Income not available? Defaulting to ${fallbackAction} due to error: ${errorMessage}`);
+              if (['Coup', 'Assassinate', 'Steal'].includes(fallbackAction)) {
+                    const activeOpponents = input.opponentInfo.filter(o => o.influenceCount > 0);
+                    if(activeOpponents.length > 0) {
+                       fallbackTarget = activeOpponents[Math.floor(Math.random() * activeOpponents.length)].name;
+                       fallbackReasoning += ` Selecting random target ${fallbackTarget}.`;
+                    } else {
+                        console.error(`AI Action Selection Fallback (Flow Execution): Fallback action ${fallbackAction} needs target but none exist!`);
+                    }
+              }
          } else {
+            // Default to Income
             console.warn(`AI Action Selection Fallback (Flow Execution): Defaulting to Income due to error: ${errorMessage}`);
              fallbackReasoning += ` Defaulting to ${fallbackAction}.`;
          }
@@ -288,5 +301,5 @@ export async function selectAction(input: AIActionSelectionInput): Promise<AIAct
            reasoning: fallbackReasoning,
            target: fallbackTarget,
        };
-  }
+    }
 }

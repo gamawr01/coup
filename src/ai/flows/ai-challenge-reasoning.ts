@@ -78,13 +78,6 @@ Output Format (JSON):
 `,
 });
 
-// --- Logging after prompt definition ---
-console.log("[aiChallengeReasoningFlow] Logging challengeReasoningPrompt object immediately after definition:");
-console.log(`[aiChallengeReasoningFlow] typeof challengeReasoningPrompt: ${typeof challengeReasoningPrompt}`);
-console.log(`[aiChallengeReasoningFlow] challengeReasoningPrompt keys: ${challengeReasoningPrompt ? Object.keys(challengeReasoningPrompt).join(', ') : 'null/undefined'}`);
-console.log(`[aiChallengeReasoningFlow] typeof challengeReasoningPrompt.generate: ${typeof challengeReasoningPrompt?.generate}`);
-// --- End Logging ---
-
 
 // Define the flow using the loaded prompt
 const aiChallengeReasoningFlow = ai.defineFlow<
@@ -101,37 +94,42 @@ const aiChallengeReasoningFlow = ai.defineFlow<
     let output: AiChallengeReasoningOutput | null = null;
      try {
          console.log("[aiChallengeReasoningFlow] Input received:", JSON.stringify(input, null, 2));
-         console.log("[aiChallengeReasoningFlow] Checking challengeReasoningPrompt object inside flow:", typeof challengeReasoningPrompt);
 
-         if (typeof challengeReasoningPrompt !== 'function' || typeof challengeReasoningPrompt?.generate !== 'function') {
-            console.error("[aiChallengeReasoningFlow] CRITICAL ERROR: challengeReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
-             console.error("[aiChallengeReasoningFlow] challengeReasoningPrompt value:", challengeReasoningPrompt);
-             // Capture more details about the prompt object if it exists but lacks generate
-             if(challengeReasoningPrompt) {
-                 console.error("[aiChallengeReasoningFlow] challengeReasoningPrompt keys inside error check:", Object.keys(challengeReasoningPrompt).join(', '));
-             }
-            throw new Error("Internal Server Error: AI prompt definition failed.");
-         }
-          console.log("[aiChallengeReasoningFlow] Calling challengeReasoningPrompt.generate...");
-        // Pass input directly to the prompt function
-        llmResponse = await challengeReasoningPrompt.generate({ input });
+         // Correct Genkit v1.x invocation: call the prompt object directly
+         console.log("[aiChallengeReasoningFlow] Calling challengeReasoningPrompt...");
+         llmResponse = await challengeReasoningPrompt(input);
          console.log("[aiChallengeReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
          // console.log("[aiChallengeReasoningFlow] LLM Raw Text:", llmResponse.text);
 
+         output = llmResponse.output; // Genkit attempts parsing
 
-        output = llmResponse.output;
+         if (!output) {
+             console.error("AI Challenge Reasoning Error: LLM response did not contain valid structured output (output is null/undefined).");
+             console.error("LLM Raw Text Response:", llmResponse?.text);
+             console.error("LLM Finish Reason:", llmResponse?.finishReason);
+             // Attempt manual parse as fallback
+             try {
+                 if (llmResponse?.text) {
+                     output = JSON.parse(llmResponse.text) as AiChallengeReasoningOutput;
+                     console.log("[aiChallengeReasoningFlow] Manual JSON parse successful:", output);
+                     output = AiChallengeReasoningOutputSchema.parse(output); // Validate manual parse
+                     console.log("[aiChallengeReasoningFlow] Manual parse validated.");
+                 } else {
+                    throw new Error("LLM response text was empty.");
+                 }
+             } catch(parseError: any) {
+                 console.error("AI Challenge Reasoning Error: Manual JSON parse/validation failed.", parseError?.message);
+                 throw new Error(`LLM response could not be parsed as valid JSON matching the schema. Raw text: ${llmResponse?.text}`);
+             }
+         }
 
-        if (!output) {
-             console.error("AI Challenge Reasoning Error: LLM response did not contain structured output.");
-             console.error("LLM Raw Text Response:", llmResponse.text);
-             console.error("LLM Finish Reason:", llmResponse.finishReason);
-             console.error("LLM Usage Data:", llmResponse.usage);
-            throw new Error("LLM response did not contain structured output.");
-        }
-         console.log("[aiChallengeReasoningFlow] Raw output from LLM:", JSON.stringify(output, null, 2));
+         // Validate output (ensure boolean is present)
+        if (typeof output.shouldChallenge !== 'boolean') {
+             console.error("AI Challenge Reasoning Error: Parsed output missing 'shouldChallenge' boolean.");
+             throw new Error("Parsed output missing 'shouldChallenge' boolean.");
+         }
+        const validatedOutput = output; // Use parsed/validated output
 
-        // Validate output
-        const validatedOutput = AiChallengeReasoningOutputSchema.parse(output);
         console.log("AI Challenge Reasoning Flow: Successfully generated and validated output:", validatedOutput);
         return validatedOutput;
 
@@ -162,9 +160,9 @@ const aiChallengeReasoningFlow = ai.defineFlow<
 export async function aiChallengeReasoning(input: AiChallengeReasoningInput): Promise<AiChallengeReasoningOutput> {
     console.log("AI Challenge Reasoning with input:", JSON.stringify(input, null, 2));
      // Add rulebook content dynamically to the input for the flow
-     const flowInput = { ...input, rulebook: coupRulebook };
+     const flowInput = { ...input, rulebook: input.rulebook ?? coupRulebook };
     try {
-        const result = await aiChallengeReasoningFlow(flowInput);
+        const result = await aiChallengeReasoningFlow(flowInput); // Await the flow
         console.log("AI Challenge decision:", result);
         return result;
     } catch (error: any) {
