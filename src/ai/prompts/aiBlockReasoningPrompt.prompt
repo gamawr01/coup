@@ -1,0 +1,86 @@
+---
+name: aiBlockReasoningPrompt
+input:
+  schema:
+    type: object
+    properties:
+      action:
+        type: string
+        description: The action being performed by the opponent that you might block.
+      aiPlayerInfluenceCards:
+        type: array
+        items:
+          type: string
+        description: The AI player's current *unrevealed* influence cards.
+      aiPlayerMoney:
+        type: number
+        description: The amount of money the AI player has.
+      opponentInfluenceCount:
+        type: number
+        description: The number of *unrevealed* influence cards the opponent performing the action has.
+      opponentMoney:
+        type: number
+        description: The amount of money the opponent performing the action has.
+      gameState:
+        type: string
+        description: The current state of the game, as a descriptive summary.
+output:
+  schema:
+    type: object
+    properties:
+      shouldBlock:
+        type: boolean
+        description: Whether the AI should block the action or not.
+      reasoning:
+        type: string
+        description: The AI reasoning behind the decision.
+template: |
+  You are an AI assistant playing the game Coup. Your opponent is attempting to perform the action: **{{action}}**. You must decide whether to block this action.
+
+  You are the AI player.
+  Your UNREVEALED influence cards: {{#each aiPlayerInfluenceCards}}{{.}}, {{/each}}.
+  Your money: {{aiPlayerMoney}} coins.
+
+  Opponent performing the action:
+  Unrevealed influence cards: {{opponentInfluenceCount}}.
+  Money: {{opponentMoney}} coins.
+
+  Current Game State:
+  {{gameState}}
+
+  Based on this information, decide whether you should block the action **{{action}}**.
+
+  Think step-by-step:
+  1. Identify which action is being performed: {{action}}.
+  2. Determine if this action *can* be blocked by you:
+      - Foreign Aid: Can be blocked by claiming Duke.
+      - Steal: Can be blocked by claiming Captain or Ambassador (if you were the target).
+      - Assassinate: Can be blocked by claiming Contessa (if you were the target).
+      - Other actions (Income, Coup, Tax, Exchange) cannot be blocked. If the action cannot be blocked, return false.
+  3. If the action can be blocked, determine if *you* have the required card (or want to bluff having it):
+      - Block Foreign Aid: Do you have/claim Duke?
+      - Block Steal: Do you have/claim Captain or Ambassador?
+      - Block Assassinate: Do you have/claim Contessa?
+  4. Assess the impact of the action succeeding:
+      - Foreign Aid: Opponent gains 2 coins. Minor impact usually.
+      - Steal: Opponent gains up to 2 coins from you. Moderate impact.
+      - Assassinate: You lose an influence card. Major impact, potentially game-losing.
+  5. Evaluate the risk vs. reward of blocking:
+      - **Risk of Blocking:** If you block (especially bluffing), the opponent might challenge your block. If you lose the challenge, you lose an influence.
+      - **Reward of Blocking:** If your block succeeds (either unchallenged or you win the challenge), the opponent's action fails. This is highly beneficial if blocking Assassinate, moderately beneficial for Steal/Foreign Aid.
+  6. Make a decision:
+      - **Always block Assassination if you have Contessa.** Consider bluffing Contessa if the Assassination would make you lose the game, but be aware of the challenge risk.
+      - Consider blocking Steal if you have Captain/Ambassador, especially if you are low on coins or the opponent is close to Coup amount. Bluffing is riskier.
+      - Consider blocking Foreign Aid if you have Duke, especially if multiple opponents are taking it frequently or an opponent is close to Coup amount. Bluffing Duke is generally low reward unless stopping a game-winning Coup setup.
+      - If you don't have the card and the risk of the action succeeding is low/moderate, usually best to Allow.
+
+  Explain your reasoning, and then state whether you will block or not.
+
+  Output your decision as JSON:
+  ```json
+  {
+    "shouldBlock": {{true if you will block the action, false otherwise}},
+    "reasoning": "{{Your step-by-step reasoning for blocking or not blocking based on the analysis above}}"
+  }
+  ```
+---

@@ -1,1 +1,3 @@
-// Flows will be imported for their side effects in this file.
+import '@/ai/flows/ai-action-selection.ts';
+import '@/ai/flows/ai-challenge-reasoning.ts';
+import '@/ai/flows/ai-block-reasoning.ts';

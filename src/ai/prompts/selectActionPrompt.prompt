@@ -1,0 +1,74 @@
+---
+name: selectActionPrompt
+input:
+  schema:
+    type: object
+    properties:
+      playerMoney:
+        type: number
+        description: The amount of money the AI player has.
+      playerInfluence:
+        type: number
+        description: The number of influence cards the AI player has.
+      opponentActions:
+        type: array
+        items:
+          type: string
+        description: The recent actions taken by opponents in the game.
+      availableActions:
+        type: array
+        items:
+          type: string
+        description: The actions the AI player can currently take (e.g., Income, Foreign Aid, Coup).
+      gameState:
+        type: string
+        description: A description of the current game state.
+output:
+  schema:
+    type: object
+    properties:
+      action:
+        type: string
+        description: The action the AI player should take.
+      target:
+        type: string
+        description: The target of the action (Player Name), if applicable.
+      reasoning:
+        type: string
+        description: The AI reasoning for selecting this action.
+template: |
+  You are an AI player in the game Coup. Your goal is to be the last player with influence.
+
+  Here's the current game state:
+  {{gameState}}
+
+  You have {{playerMoney}} coins and {{playerInfluence}} influence.
+
+  The recent actions taken by opponents are: {{#each opponentActions}}{{.}}, {{/each}}
+
+  The actions you can take are: {{#each availableActions}}{{.}}, {{/each}}
+
+  Based on this information, select the best action for you to take. Consider your current resources, the actions of your opponents, and the overall game state. If choosing an action that requires a target (Coup, Assassinate, Steal), specify the name of the target player.
+
+  Think step-by-step:
+  1. Assess your current situation (money, influence). Can you Coup? Are you close to Couping? Are you vulnerable?
+  2. Assess opponents' situations (money, known/revealed influence, active status). Who is the biggest threat? Who is vulnerable?
+  3. Consider the available actions. Which action maximizes your advantage or minimizes risk?
+     - Income: Safe, but slow. Good if saving for Coup or other actions are too risky.
+     - Foreign Aid: Faster than Income, but can be blocked by Duke. Riskier if opponents might have Duke.
+     - Tax (Duke claim): Good for income, but can be challenged. Less risky if you actually have Duke.
+     - Assassinate (Assassin claim): Powerful for eliminating influence, costs 3 coins, can be blocked by Contessa or challenged. Risky. Target the biggest threat.
+     - Steal (Captain claim): Gain coins, deny opponent coins. Can be blocked by Captain/Ambassador or challenged. Target players with coins.
+     - Exchange (Ambassador claim): Improve your hidden influence. Can be challenged. Good if you have poor cards.
+     - Coup: Expensive (7 coins), but guaranteed influence removal (cannot be blocked/challenged). Use on biggest threats or to secure win. Must Coup if you have 10+ coins.
+  4. Choose the action and target (if necessary) that best fits your strategy. Provide clear reasoning.
+
+  Output your decision as JSON:
+  ```json
+  {
+    "action": "{{the action you choose}}",
+    "target": "{{the target player's name, if applicable, otherwise omit}}",
+    "reasoning": "{{your step-by-step reasoning for choosing this action}}"
+  }
+  ```
+---

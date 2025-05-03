@@ -1,0 +1,76 @@
+---
+name: aiChallengeReasoningPrompt
+input:
+  schema:
+    type: object
+    properties:
+      action:
+        type: string
+        description: The action being performed by the opponent.
+      currentPlayer:
+        type: string
+        description: The name of the current player performing the action.
+      targetPlayer:
+        type: string
+        description: The name of the target player, if applicable.
+      amount:
+        type: number
+        description: The amount of coins involved in the action, if applicable.
+      aiInfluence:
+        type: array
+        items:
+          type: string
+        description: The AI player’s current *unrevealed* influence cards.
+      opponentInfluenceCount:
+        type: number
+        description: The number of *unrevealed* influence cards the opponent (currentPlayer) has.
+      gameState:
+        type: string
+        description: A summary of the current game state including player money and known/revealed card information.
+output:
+  schema:
+    type: object
+    properties:
+      shouldChallenge:
+        type: boolean
+        description: Whether the AI should challenge the action.
+      reason:
+        type: string
+        description: The AI’s reasoning for challenging or not challenging the action.
+template: |
+  You are an AI assistant playing the game Coup. You need to decide whether to challenge an opponent's action claim.
+
+  Current Game State:
+  {{gameState}}
+
+  Opponent {{currentPlayer}} is attempting to perform the action: **{{action}}**.
+  {{#if targetPlayer}}The target player is {{targetPlayer}}.{{/if}}
+  {{#if amount}}The amount of coins involved is {{amount}}.{{/if}}
+
+  You are the AI player. Your current UNREVEALED influence cards are: {{#each aiInfluence}}{{.}}, {{/each}}.
+  The opponent ({{currentPlayer}}) has {{opponentInfluenceCount}} UNREVEALED influence cards remaining.
+
+  Based on this information, should you challenge the action {{action}}?
+
+  Think step-by-step:
+  1. Identify the card required for the opponent's action (e.g., Tax requires Duke, Assassinate requires Assassin). If the action doesn't require a specific card claim (Income, Foreign Aid, Coup), it cannot be challenged this way (return false).
+  2. Assess the likelihood the opponent has the required card. Consider:
+      - How many influence cards do they have left? More cards means higher chance.
+      - Have they claimed this role before? Successfully? Unsuccessfully?
+      - What is the general game state? Are they desperate? Are they rich?
+      - How many of the required cards are potentially out of the deck (revealed by anyone, or held by you)? If 3 Dukes are revealed, a Tax claim is a bluff.
+  3. Evaluate the risk vs. reward of challenging:
+      - **Risk of Challenging:** If you challenge and are wrong, you lose an influence card. This is very costly.
+      - **Reward of Challenging:** If you challenge and are right, the opponent loses an influence card, and their action fails. This is very beneficial.
+  4. Make a decision: Generally, challenge only if you are reasonably confident they are bluffing (e.g., you hold the card they claim, or many are revealed) OR if letting the action succeed is extremely detrimental to you (e.g., a game-losing Assassination). Avoid risky challenges early in the game. Be more willing to challenge if you have only one influence left and the action targets you.
+
+  Provide your reasoning, then state your decision clearly.
+
+  Output your decision as JSON:
+  ```json
+  {
+    "shouldChallenge": {{true if you challenge, false otherwise}},
+    "reason": "{{Your step-by-step reasoning based on the analysis above}}"
+  }
+  ```
+---
