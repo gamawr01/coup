@@ -3,12 +3,13 @@
 import { useState, useEffect, useCallback } from 'react';
 import { GameBoard } from '@/components/game-board';
 import type { GameState, ActionType, CardType, GameResponseType } from '@/lib/game-types';
-import { initializeGame, performAction, handlePlayerResponse, handleExchangeSelection, handleAIAction } from '@/lib/game-logic'; // Added handleAIAction import
+import { initializeGame, performAction, handlePlayerResponse, handleExchangeSelection, handleAIAction } from '@/lib/game-logic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from "@/hooks/use-toast";
+import { Loader2 } from 'lucide-react'; // Import loader icon
 
 // Define constants for game setup
 const DEFAULT_PLAYER_NAME = "Player 1";
@@ -62,7 +63,7 @@ export default function Home() {
         } else {
             // Log whose turn it is after state update
             const currentPlayer = newState.players[newState.currentPlayerIndex];
-             console.log(`[updateGameState] State updated. Current turn: ${currentPlayer.name} (${currentPlayer.isAI ? 'AI' : 'Human'})`);
+             console.log(`[updateGameState] State updated. Current turn: ${currentPlayer.name} (${currentPlayer.isAI ? 'AI' : 'Human'}). Needs AI trigger: ${newState.needsHumanTriggerForAI}`);
         }
 
 
@@ -86,7 +87,7 @@ export default function Home() {
     }
 
     console.log("[startGame] Initializing game...");
-    const initialState = initializeGame([playerName], aiCount);
+    let initialState = initializeGame([playerName], aiCount);
     const initialPlayer = initialState.players[initialState.currentPlayerIndex];
     setHumanPlayerId(initialState.players.find(p => !p.isAI)?.id || 'player-0');
     toast({ title: "Game Started!", description: `Playing against ${aiCount} AI opponents. ${initialPlayer.name}'s turn.` });
@@ -94,29 +95,24 @@ export default function Home() {
     console.log("[startGame] Game initialized. Initial state:", initialState);
     console.log(`[startGame] First turn: ${initialPlayer.name} (${initialPlayer.isAI ? 'AI' : 'Human'})`);
 
-    // Update state with initial game setup FIRST
-    // Use a function to ensure it runs after the sync setup
-    updateGameState(() => {
-        // If the first player is AI, *immediately* trigger their action *after* setting the initial state.
-        if (initialPlayer.isAI) {
-            console.log(`[startGame] Initial player ${initialPlayer.name} is AI. Triggering AI action...`);
-            // We need to return a promise that resolves to the state *after* the AI has acted.
-            // handleAIAction should return the *final* state after the AI's turn (including advances).
-            return handleAIAction(initialState);
-        } else {
-            // If human starts, just return the initial state.
-            console.log(`[startGame] Initial player ${initialPlayer.name} is Human. Setting initial state.`);
-            return initialState;
-        }
-    });
+    // If the first player is AI, set the flag to wait for the trigger button.
+    if (initialPlayer.isAI) {
+        console.log(`[startGame] Initial player ${initialPlayer.name} is AI. Setting needsHumanTriggerForAI flag.`);
+        initialState = { ...initialState, needsHumanTriggerForAI: true };
+    }
 
+    // Update state with the initial setup (potentially with the flag set)
+    updateGameState(() => initialState);
 
   }, [playerName, aiCount, toast, updateGameState]); // Added updateGameState dependency
 
 
   const handlePlayerAction = useCallback((action: ActionType, targetId?: string) => {
-      if (!gameState || isProcessing || gameState.winner) {
-          console.warn(`[handlePlayerAction] Action blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, winner=${!!gameState?.winner}`);
+      if (!gameState || isProcessing || gameState.winner || gameState.needsHumanTriggerForAI) {
+          console.warn(`[handlePlayerAction] Action blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, winner=${!!gameState?.winner}, needsAITrigger=${gameState?.needsHumanTriggerForAI}`);
+          if (gameState?.needsHumanTriggerForAI) {
+                toast({ title: "Wait", description: "Click 'Next AI Turn' to let the AI play.", variant: "destructive" });
+          }
           return;
       }
       console.log(`[handlePlayerAction] Human action: ${action}`, targetId || '');
@@ -125,7 +121,7 @@ export default function Home() {
            console.log(`[handlePlayerAction] Calling performAction for ${action}...`);
            return performAction(gameState, humanPlayerId, action, targetId)
       });
-  }, [gameState, humanPlayerId, updateGameState, isProcessing]);
+  }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
 
   const handlePlayerResponse = useCallback((response: GameResponseType) => {
       if (!gameState || isProcessing || gameState.winner) {
@@ -154,8 +150,6 @@ export default function Home() {
   }, [gameState, humanPlayerId, updateGameState, isProcessing]);
 
    // Placeholder for Forced Reveal - needs proper trigger logic from game-logic.ts
-   // This should likely be triggered internally by game-logic modifying the state
-   // to indicate a reveal is needed, not directly by the UI unless necessary.
    const handleForceReveal = useCallback((cardToReveal?: CardType) => {
        if (!gameState || isProcessing || gameState.winner) {
              console.warn(`[handleForceReveal] Reveal blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, winner=${!!gameState?.winner}`);
@@ -165,14 +159,26 @@ export default function Home() {
         // This action should be triggered *by* game-logic when a player must reveal.
         // The UI then presents the choice (if applicable) and calls this handler.
         // The game-logic should have a function like `processForcedReveal`.
-        // Example: updateGameState(() => processForcedReveal(gameState, humanPlayerId, cardToReveal));
         toast({ title: "Reveal Required", description: `You must reveal an influence card. (Needs Logic Update in game-logic)`, variant: "destructive"});
    }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
 
+   // Handler for the "Next AI Turn" button
+    const handleAIActionTrigger = useCallback(async () => {
+        if (!gameState || isProcessing || !gameState.needsHumanTriggerForAI || gameState.winner) {
+            console.warn(`[handleAIActionTrigger] Trigger blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, needsTrigger=${gameState?.needsHumanTriggerForAI}, winner=${!!gameState?.winner}`);
+            return;
+        }
+        console.log(`[handleAIActionTrigger] Triggering AI action for ${gameState.players[gameState.currentPlayerIndex].name}`);
 
-   // Removed the useEffect hook that tried to handle AI turns.
-   // This is now handled within the `advanceTurn` function in `game-logic.ts`
-   // and the initial AI turn is handled in `startGame`.
+        // Update the state immediately to clear the flag and show processing state
+        // Then, call the actual handleAIAction function.
+        updateGameState(async () => {
+            console.log(`[handleAIActionTrigger] Calling handleAIAction...`);
+             // Pass a state with the flag cleared to handleAIAction
+            const stateForAI = { ...gameState, needsHumanTriggerForAI: false };
+            return handleAIAction(stateForAI);
+        });
+    }, [gameState, updateGameState, isProcessing]);
 
 
   if (!gameStarted) {
@@ -204,6 +210,7 @@ export default function Home() {
                        />
                    </div>
                    <Button onClick={startGame} className="w-full" disabled={isProcessing}>
+                       {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                        Start Game
                    </Button>
                </CardContent>
@@ -216,10 +223,10 @@ export default function Home() {
   if (!gameState) {
     return (
         <div className="flex justify-center items-center min-h-screen">
-             <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div>
+             <Loader2 className="h-16 w-16 animate-spin text-primary" />
              <p className="text-primary ml-4">Loading game...</p>
          </div>
-    ); // Or a loading spinner
+    ); // Loading spinner
   }
 
   return (
@@ -233,9 +240,20 @@ export default function Home() {
         onExchange={handlePlayerExchange}
         onForceReveal={handleForceReveal} // Pass the handler
       />
+       {/* Button to trigger AI turn */}
+       {gameState.needsHumanTriggerForAI && !gameState.winner && (
+           <div className="text-center mt-4">
+               <Button onClick={handleAIActionTrigger} disabled={isProcessing}>
+                    {isProcessing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    Next AI Turn ({gameState.players[gameState.currentPlayerIndex].name})
+                </Button>
+           </div>
+       )}
+
+       {/* Global Processing Overlay */}
        {isProcessing && (
            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-               <div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary"></div>
+               <Loader2 className="h-16 w-16 animate-spin text-primary" />
                <p className="text-white ml-4">Processing...</p>
            </div>
        )}
