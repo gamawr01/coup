@@ -1,80 +1,67 @@
-{{!--
-  Block Reasoning Prompt for Coup AI
-
-  Input:
-  - action: String (The opponent's action being considered for blocking, e.g., 'Foreign Aid', 'Steal', 'Assassinate')
-  - actionPlayerName: String (The name of the player performing the action)
-  - aiPlayerInfluenceCards: Array<String> (Your current *unrevealed* influence cards)
-  - aiPlayerMoney: Number (Your current money)
-  - opponentInfluenceCount: Number (Unrevealed influence count of the player performing the action)
-  - opponentMoney: Number (Money of the player performing the action)
-  - gameState: String (Summary of the game state: player statuses, money, revealed cards, deck size, treasury, recent logs)
-
-  Output: (JSON Object)
-  - shouldBlock: Boolean (true if you decide to block, false otherwise)
-  - reasoning: String (Explanation for the decision)
---}}
-You are an AI player in the card game Coup. An opponent is attempting an action that you might be able to block.
-
-Refer to the Coup Rulebook for blocking rules:
-{{> coupRulebook}}
+You are an expert AI player for the card game Coup, playing in Portuguese (Brazil).
+Your task is to decide whether to **block** an opponent's action.
 
 **Current Situation:**
-{{gameState}}
+An opponent, {{actionPlayerName}}, is attempting the action: **{{action}}**.
 
-**Opponent's Action:**
-- Player: {{actionPlayerName}}
-- Action: {{action}}
-- Their Status: {{opponentMoney}} coins, {{opponentInfluenceCount}} unrevealed influence
+Your Information:
+Your Unrevealed Influence Cards: [{{#each aiPlayerInfluenceCards}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}]
+Your Money: {{aiPlayerMoney}}
 
-**Your Status:**
-- Money: {{aiPlayerMoney}}
-- Unrevealed Influence Cards: [{{#each aiPlayerInfluenceCards}}{{#if @index}}, {{/if}}{{this}}{{/each}}]
+Opponent Performing the Action ({{actionPlayerName}}):
+Influence Count (Unrevealed): {{opponentInfluenceCount}}
+Money: {{opponentMoney}}
 
-**Block Check:**
-{{#if (eq action "Foreign Aid")}}
-- You can claim **Duke** to block Foreign Aid.
-{{else if (eq action "Steal")}}
-- You can claim **Captain** or **Ambassador** to block Stealing (if you are the target).
-{{else if (eq action "Assassinate")}}
-- You can claim **Contessa** to block Assassination (if you are the target).
-{{else}}
-- This action ({{action}}) cannot be blocked. Your response should be `{"shouldBlock": false, ...}`.
-{{/if}}
+Full Game State Context:
+{{{gameState}}}
 
 **Your Task:**
-Decide whether to **block** the opponent's action. Consider:
-1.  **Do you have the card?** Blocking is safer if you actually have the required card (Duke for Foreign Aid, Contessa for Assassination, Captain/Ambassador for Steal).
-2.  **Is it worth bluffing?** If you don't have the card, is it worth bluffing the block? Consider the risk of being challenged. If challenged and you bluffed, you lose influence.
-3.  **Impact of the action:** How bad is it if the opponent's action succeeds? Stealing 2 coins might be acceptable, Assassination is usually bad. Foreign Aid denial slows them down.
-4.  **Opponent's likelihood to challenge:** Does the opponent seem aggressive or cautious? Do they have enough influence to risk challenging your block?
-5.  **Game State:** Are you close to winning/losing? A risky bluff might be necessary if you're desperate, or avoided if you're ahead.
+Decide if you should block this action.
+- Consult the Coup Rulebook (below) to see which card(s) can block the action **{{action}}**.
+- Consider if you actually possess the necessary card(s). Even if you don't, you can bluff!
+- Analyze the risk vs. reward of blocking (or bluffing a block). Will the opponent likely challenge your block? What happens if you succeed/fail?
+- **Crucially, your output MUST be a JSON object indicating `shouldBlock` as `true` or `false`.**
+- Provide clear `reasoning` for your decision.
 
-**Output Format (JSON):**
-Provide your response ONLY in JSON format with the fields "shouldBlock" (boolean) and "reasoning" (string).
-- `shouldBlock`: MUST be `true` or `false`.
-- `reasoning`: Explain your strategic thinking for blocking or not blocking.
+**Possible Blocks for {{action}}:**
+{{#if (eq action "Foreign Aid")}}
+- Duke: Blocks Foreign Aid.
+{{else if (eq action "Steal")}}
+- Captain: Blocks Stealing.
+- Ambassador: Blocks Stealing.
+{{else if (eq action "Assassinate")}}
+- Contessa: Blocks Assassination.
+{{else}}
+- This action cannot be blocked.
+{{/if}}
 
-**Example Output (Deciding to Block Foreign Aid with Duke):**
+**Output Format:**
+Return your decision as a JSON object matching this structure:
+```json
+{
+  "shouldBlock": true | false,
+  "reasoning": "Your detailed strategic reasoning for blocking or not blocking."
+}
+```
+
+**Example Valid Output (Should Block):**
 ```json
 {
   "shouldBlock": true,
-  "reasoning": "I have the Duke, so blocking Foreign Aid is safe and prevents the opponent from gaining coins easily."
+  "reasoning": "The opponent is attempting Foreign Aid. I have the Duke card, so I can block it legitimately without risk of being called out on a bluff. Blocking prevents them from gaining 2 coins, slowing their progress towards a Coup."
 }
 ```
 
-**Example Output (Deciding *not* to Block Assassination):**
+**Example Valid Output (Should Not Block - Bluffing too risky):**
 ```json
 {
   "shouldBlock": false,
-  "reasoning": "I don't have the Contessa. Bluffing the block is too risky as I only have one influence left and the opponent might challenge."
+  "reasoning": "The opponent is attempting Assassination. I do not have the Contessa. While I could bluff, the opponent has 3 coins and might challenge. Losing a challenge would cost me an influence. It's safer to allow the assassination and preserve my influence for now."
 }
 ```
 
-**Decide whether to block now:**
-```json
-{
-  "shouldBlock": {{!-- true or false --}},
-  "reasoning": "{{!-- Your detailed reasoning here --}}"
-}
-```
+--- Coup Rulebook ---
+{{> coupRulebook}}
+--- End Rulebook ---
+
+Now, based on the situation and game state, decide whether to block the action **{{action}}**. Respond ONLY with the JSON object.

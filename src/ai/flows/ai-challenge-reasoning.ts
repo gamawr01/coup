@@ -58,11 +58,22 @@ const aiChallengeReasoningFlow = ai.defineFlow<
     outputSchema: AiChallengeReasoningOutputSchema,
   },
   async (input) => {
-    let llmResponse: GenerateResponse<z.infer<typeof AiChallengeReasoningOutputSchema>>;
+    let llmResponse: GenerateResponse<z.infer<typeof AiChallengeReasoningOutputSchema>> | null = null;
     let output: AiChallengeReasoningOutput | null = null;
      try {
-         // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
+         console.log("[aiChallengeReasoningFlow] Input received:", JSON.stringify(input, null, 2));
+         console.log("[aiChallengeReasoningFlow] Checking challengeReasoningPrompt object:", typeof challengeReasoningPrompt, Object.keys(challengeReasoningPrompt || {}));
+
+         if (typeof challengeReasoningPrompt?.generate !== 'function') {
+            console.error("[aiChallengeReasoningFlow] CRITICAL ERROR: challengeReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
+            console.error("[aiChallengeReasoningFlow] challengeReasoningPrompt value:", challengeReasoningPrompt);
+            throw new Error("Internal Server Error: AI prompt definition failed."); // Throw a more specific internal error
+         }
+          console.log("[aiChallengeReasoningFlow] Calling challengeReasoningPrompt.generate...");
         llmResponse = await challengeReasoningPrompt.generate({ input });
+         console.log("[aiChallengeReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
+         console.log("[aiChallengeReasoningFlow] LLM Raw Text:", llmResponse.text);
+
          // Access output directly in 1.x
         output = llmResponse.output;
 
@@ -73,6 +84,7 @@ const aiChallengeReasoningFlow = ai.defineFlow<
              console.error("LLM Usage Data:", llmResponse.usage);
             throw new Error("LLM response did not contain structured output.");
         }
+         console.log("[aiChallengeReasoningFlow] Raw output from LLM:", JSON.stringify(output, null, 2));
 
         // Validate output
         const validatedOutput = AiChallengeReasoningOutputSchema.parse(output);
@@ -80,11 +92,13 @@ const aiChallengeReasoningFlow = ai.defineFlow<
         return validatedOutput;
 
      } catch (e: any) {
-        console.error("AI Challenge Reasoning Error:", e); // Log the full error object
-        console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
+         const errorMessage = e instanceof Error ? e.message : String(e);
+         console.error("AI Challenge Reasoning Error:", errorMessage); // Log the error message
+         console.error("Error Details:", e); // Log the full error object
+         console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
         if (output) { // Log the raw output if available, even if invalid
              console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
-        } else if (llmResponse!) { // Log raw text if structured output was null
+        } else if (llmResponse) { // Log raw text if structured output was null
              console.error("LLM Raw Text Response (on error):", llmResponse.text);
              console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
              console.error("LLM Usage Data (on error):", llmResponse.usage);
@@ -92,7 +106,7 @@ const aiChallengeReasoningFlow = ai.defineFlow<
          // Fallback logic: Default to not challenging
          return {
              shouldChallenge: false, // Safer default
-             reasoning: `AI generation, parsing, or validation failed: ${e.message || 'Unknown error'}. Raw output might be logged above. Defaulting to not challenging.`,
+             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Raw output might be logged above. Defaulting to not challenging.`,
          };
      }
   }
@@ -105,11 +119,12 @@ export async function aiChallengeReasoning(input: AiChallengeReasoningInput): Pr
         console.log("AI Challenge decision:", result);
         return result;
     } catch (error: any) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("Error executing aiChallengeReasoningFlow:", error);
         // Fallback in case the flow itself throws an unexpected error
         return {
             shouldChallenge: false, // Safer default
-            reasoning: `An unexpected error occurred during AI challenge reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not challenging.`,
+            reasoning: `An unexpected error occurred during AI challenge reasoning flow execution: ${errorMessage}. Defaulting to not challenging.`,
         };
     }
 }

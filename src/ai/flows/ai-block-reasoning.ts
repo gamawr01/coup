@@ -69,11 +69,23 @@ const aiBlockReasoningFlow = ai.defineFlow<
     outputSchema: AIBlockReasoningOutputSchema,
   },
   async (input) => {
-     let llmResponse: GenerateResponse<z.infer<typeof AIBlockReasoningOutputSchema>>;
+     let llmResponse: GenerateResponse<z.infer<typeof AIBlockReasoningOutputSchema>> | null = null;
      let output: AIBlockReasoningOutput | null = null;
      try {
-         // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
+         console.log("[aiBlockReasoningFlow] Input received:", JSON.stringify(input, null, 2));
+         console.log("[aiBlockReasoningFlow] Checking blockReasoningPrompt object:", typeof blockReasoningPrompt, Object.keys(blockReasoningPrompt || {}));
+
+        if (typeof blockReasoningPrompt?.generate !== 'function') {
+            console.error("[aiBlockReasoningFlow] CRITICAL ERROR: blockReasoningPrompt.generate is NOT a function! Prompt definition might have failed.");
+            console.error("[aiBlockReasoningFlow] blockReasoningPrompt value:", blockReasoningPrompt);
+            throw new Error("Internal Server Error: AI prompt definition failed."); // Throw a more specific internal error
+        }
+         console.log("[aiBlockReasoningFlow] Calling blockReasoningPrompt.generate...");
          llmResponse = await blockReasoningPrompt.generate({ input });
+          console.log("[aiBlockReasoningFlow] LLM response received. Finish Reason:", llmResponse.finishReason);
+          console.log("[aiBlockReasoningFlow] LLM Raw Text:", llmResponse.text);
+
+
          // Access output directly in 1.x
          output = llmResponse.output;
 
@@ -84,6 +96,7 @@ const aiBlockReasoningFlow = ai.defineFlow<
              console.error("LLM Usage Data:", llmResponse.usage);
             throw new Error("LLM response did not contain structured output.");
         }
+         console.log("[aiBlockReasoningFlow] Raw output from LLM:", JSON.stringify(output, null, 2));
 
          // Validate output
          const validatedOutput = AIBlockReasoningOutputSchema.parse(output);
@@ -91,11 +104,13 @@ const aiBlockReasoningFlow = ai.defineFlow<
           return validatedOutput;
 
      } catch (e: any) {
-         console.error("AI Block Reasoning Error:", e); // Log the full error object
-         console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
+          const errorMessage = e instanceof Error ? e.message : String(e);
+          console.error("AI Block Reasoning Error:", errorMessage); // Log the error message
+          console.error("Error Details:", e); // Log the full error object
+          console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
         if (output) { // Log the raw output if available, even if invalid
              console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
-        } else if (llmResponse!) { // Log raw text if structured output was null
+        } else if (llmResponse) { // Log raw text if structured output was null
              console.error("LLM Raw Text Response (on error):", llmResponse.text);
              console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
              console.error("LLM Usage Data (on error):", llmResponse.usage);
@@ -103,7 +118,7 @@ const aiBlockReasoningFlow = ai.defineFlow<
          // Fallback logic: Default to not blocking
          return {
              shouldBlock: false, // Safer default
-             reasoning: `AI generation, parsing, or validation failed: ${e.message || 'Unknown error'}. Raw output might be logged above. Defaulting to not blocking.`,
+             reasoning: `AI generation, parsing, or validation failed: ${errorMessage}. Raw output might be logged above. Defaulting to not blocking.`,
          };
      }
   }
@@ -123,11 +138,12 @@ export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AI
        console.log("AI Block decision:", result);
        return result;
    } catch (error: any) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
         console.error("Error executing aiBlockReasoningFlow:", error);
         // Fallback in case the flow itself throws an unexpected error
         return {
             shouldBlock: false, // Safer default
-            reasoning: `An unexpected error occurred during AI block reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not blocking.`,
+            reasoning: `An unexpected error occurred during AI block reasoning flow execution: ${errorMessage}. Defaulting to not blocking.`,
         };
    }
 }
