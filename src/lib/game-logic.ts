@@ -1,4 +1,5 @@
 
+
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
@@ -107,8 +108,9 @@ function returnCardToDeck(deck: CardType[], card: CardType): CardType[] {
    return shuffleDeck(newDeck);
 }
 
-function getPlayerById(gameState: GameState, playerId: string): Player | undefined {
-  return gameState.players.find(p => p.id === playerId);
+function getPlayerById(gameState: GameState | null, playerId: string): Player | undefined {
+    if (!gameState) return undefined;
+    return gameState.players.find(p => p.id === playerId);
 }
 
 function getActivePlayers(gameState: GameState): Player[] {
@@ -124,7 +126,7 @@ function getNextPlayerIndex(currentIndex: number, players: Player[]): number {
 
     let nextIndex = (currentIndex + 1) % players.length;
     let safetyCounter = 0; // Prevent infinite loops
-    while (!players[nextIndex].influence.some(card => !card.revealed)) {
+    while (!players[nextIndex]?.influence.some(card => !card.revealed)) { // Added safety check for players[nextIndex]
         nextIndex = (nextIndex + 1) % players.length;
         safetyCounter++;
         if (safetyCounter > players.length * 2) { // Increased safety margin
@@ -136,12 +138,9 @@ function getNextPlayerIndex(currentIndex: number, players: Player[]): number {
     return nextIndex;
 }
 
-function logAction(gameState: GameState | null, message: string): GameState {
-    if (!gameState) {
-      console.error("[logAction] Error: Attempted to log action on null gameState.");
-      // In a real scenario, you might want to throw an error or return a default error state
-      // For now, let's create a minimal error state to avoid crashing.
-      return {
+// Helper function to safely create a GameState object with an error message
+function createErrorState(errorMessage: string, previousState?: GameState | null): GameState {
+    const baseState: GameState = previousState ? { ...previousState } : {
         players: [],
         deck: [],
         treasury: 0,
@@ -149,10 +148,22 @@ function logAction(gameState: GameState | null, message: string): GameState {
         currentAction: null,
         challengeOrBlockPhase: null,
         pendingExchange: null,
-        actionLog: [`Error: GameState was null when trying to log: "${message}"`],
+        actionLog: [],
         winner: null,
         needsHumanTriggerForAI: false,
-      };
+    };
+    baseState.actionLog = [...(baseState.actionLog || []), errorMessage];
+    return baseState;
+}
+
+
+function logAction(gameState: GameState | null, message: string): GameState {
+    if (!gameState) {
+      const errorMsg = `[logAction] Error: Attempted to log action on null gameState: "${message}"`;
+      console.error(errorMsg);
+      // In a real scenario, you might want to throw an error or return a default error state
+      // For now, let's create a minimal error state to avoid crashing.
+       return createErrorState(errorMsg);
     }
 
     console.log("[Game Log]", message); // Add console logging for server/debug
@@ -164,6 +175,7 @@ function logAction(gameState: GameState | null, message: string): GameState {
         actionLog: newLog
     };
 }
+
 
 function eliminatePlayer(gameState: GameState, playerId: string): GameState {
     let newState = { ...gameState };
@@ -180,7 +192,11 @@ function eliminatePlayer(gameState: GameState, playerId: string): GameState {
 }
 
 
-function checkForWinner(gameState: GameState): Player | null {
+function checkForWinner(gameState: GameState | null): Player | null {
+    if (!gameState) {
+        console.warn("[checkForWinner] Called with null gameState.");
+        return null;
+    }
     const activePlayers = getActivePlayers(gameState);
     if (activePlayers.length === 1) {
         console.log(`[checkForWinner] Winner found: ${activePlayers[0].name}`);
@@ -196,8 +212,14 @@ function checkForWinner(gameState: GameState): Player | null {
     return null;
 }
 
+
 // Reveals influence, checks for elimination, returns new state and revealed card type
-async function revealInfluence(gameState: GameState, playerId: string, cardType?: CardType): Promise<{ newState: GameState, revealedCard: CardType | null }> {
+async function revealInfluence(gameState: GameState | null, playerId: string, cardType?: CardType): Promise<{ newState: GameState, revealedCard: CardType | null }> {
+    if (!gameState) {
+        const errorMsg = `[revealInfluence] Error: Called with null gameState for player ${playerId}.`;
+        console.error(errorMsg);
+        return { newState: createErrorState(errorMsg), revealedCard: null };
+    }
     console.log(`[revealInfluence] Player ${playerId} needs to reveal${cardType ? ` ${cardType}` : ''}.`);
     let newState = { ...gameState };
     let revealedCardType: CardType | null = null;
@@ -239,20 +261,25 @@ async function revealInfluence(gameState: GameState, playerId: string, cardType?
              newState = logAction(newState, `${player.name} revealed a ${revealedCardType}.`);
              newState = eliminatePlayer(newState, playerId); // Check if this reveal eliminates the player
         } else {
-             newState = logAction(newState, `${player.name} has no more influence to reveal!`); // Should ideally not happen if logic is correct
+             const errorMsg = `${player.name} has no more influence to reveal!`;
+             newState = logAction(newState, errorMsg); // Should ideally not happen if logic is correct
              console.warn(`[revealInfluence] Could not find influence to reveal for ${player.name} (Card type: ${cardType}, Unrevealed: ${player.influence.filter(c=>!c.revealed).map(c=>c.type).join(',')})`);
              newState = eliminatePlayer(newState, playerId);
         }
     } else {
-         console.error(`[revealInfluence] Player ID ${playerId} not found.`);
+         const errorMsg = `[revealInfluence] Player ID ${playerId} not found.`;
+         console.error(errorMsg);
+         newState = logAction(newState, errorMsg); // Log error in game state
     }
      return { newState, revealedCard: revealedCardType };
 }
 
 
+
 // --- Action Execution ---
 
-async function performIncome(gameState: GameState, playerId: string): Promise<GameState> {
+async function performIncome(gameState: GameState | null, playerId: string): Promise<GameState> {
+     if (!gameState) return createErrorState("[performIncome] Error: gameState is null.");
     console.log(`[performIncome] ${playerId} takes Income.`);
     let newState = { ...gameState };
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
@@ -269,11 +296,17 @@ async function performIncome(gameState: GameState, playerId: string): Promise<Ga
      return await advanceTurn(newState);
 }
 
-async function performForeignAid(gameState: GameState, playerId: string): Promise<GameState> {
+
+async function performForeignAid(gameState: GameState | null, playerId: string): Promise<GameState> {
+     if (!gameState) return createErrorState("[performForeignAid] Error: gameState is null.");
     console.log(`[performForeignAid] ${playerId} attempts Foreign Aid.`);
     let newState = { ...gameState };
     const player = getPlayerById(newState, playerId);
-    if (!player) return newState;
+    if (!player) {
+        const errorMsg = `[performForeignAid] Error: Player ${playerId} not found.`;
+        console.error(errorMsg);
+        return logAction(newState, errorMsg);
+    }
 
     newState = logAction(newState, `${player.name} attempts Foreign Aid (+2 coins).`);
 
@@ -289,6 +322,10 @@ async function performForeignAid(gameState: GameState, playerId: string): Promis
         };
         // AI needs to decide to block here if they are potential blockers
          newState = await triggerAIResponses(newState);
+         if (!newState) { // Check if triggerAIResponses returned null
+              console.error("[performForeignAid] triggerAIResponses returned null. Reverting.");
+              return logAction(gameState, "[performForeignAid] Error: Failed to trigger AI responses."); // Use original gameState
+         }
     } else {
         // No one can block, action succeeds immediately
          console.log(`[performForeignAid] No blockers. Action succeeds.`);
@@ -307,7 +344,9 @@ async function performForeignAid(gameState: GameState, playerId: string): Promis
 }
 
 
-async function performCoup(gameState: GameState, playerId: string, targetId: string): Promise<GameState> {
+
+async function performCoup(gameState: GameState | null, playerId: string, targetId: string): Promise<GameState> {
+    if (!gameState) return createErrorState("[performCoup] Error: gameState is null.");
     console.log(`[performCoup] ${playerId} performs Coup against ${targetId}.`);
     let newState = { ...gameState };
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
@@ -324,22 +363,41 @@ async function performCoup(gameState: GameState, playerId: string, targetId: str
         // Coup cannot be challenged or blocked, target must reveal influence
         console.log(`[performCoup] Target ${targetId} must reveal influence.`);
         const { newState: revealedState } = await revealInfluence(newState, targetId); // Ensure await here
-        newState = revealedState;
+        newState = revealedState; // Assign revealedState directly
+         if (!newState) { // Check if revealInfluence returned null (should not happen if input was valid)
+              console.error("[performCoup] revealInfluence returned null. Reverting state.");
+              return logAction(gameState, "[performCoup] Error: Failed to reveal influence.");
+         }
 
     } else {
-        newState = logAction(newState, `${newState.players[playerIndex]?.name || 'Player'} cannot perform Coup (not enough money or invalid target).`);
-         console.error(`[performCoup] Failed Coup. Player: ${JSON.stringify(newState.players[playerIndex])}, Target: ${JSON.stringify(target)}`);
-         // Should not advance turn if action failed pre-conditions
-         return newState; // Return without advancing if failed
+        const errorMsg = `${newState.players[playerIndex]?.name || 'Player'} cannot perform Coup (not enough money or invalid target).`;
+        newState = logAction(newState, errorMsg);
+        console.error(`[performCoup] Failed Coup. Player: ${JSON.stringify(newState.players[playerIndex])}, Target: ${JSON.stringify(target)}`);
+        // Should not advance turn if action failed pre-conditions
+        return newState; // Return without advancing if failed
     }
+    // Check winner before advancing
+     const winner = checkForWinner(newState);
+     if(winner) {
+         newState.winner = winner;
+         console.log(`[performCoup] Winner found after Coup: ${winner.name}`);
+         return logAction(newState, `${winner.name} has won the game!`);
+     }
+
      return await advanceTurn(newState);
 }
 
-async function performTax(gameState: GameState, playerId: string): Promise<GameState> {
+
+async function performTax(gameState: GameState | null, playerId: string): Promise<GameState> {
+     if (!gameState) return createErrorState("[performTax] Error: gameState is null.");
     console.log(`[performTax] ${playerId} attempts Tax.`);
     let newState = { ...gameState };
     const player = getPlayerById(newState, playerId);
-     if (!player) return newState;
+     if (!player) {
+          const errorMsg = `[performTax] Error: Player ${playerId} not found.`;
+          console.error(errorMsg);
+          return logAction(newState, errorMsg);
+     }
 
      newState = logAction(newState, `${player.name} attempts to Tax (+3 coins).`);
      const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
@@ -353,6 +411,10 @@ async function performTax(gameState: GameState, playerId: string): Promise<GameS
             responses: [],
         };
         newState = await triggerAIResponses(newState);
+        if (!newState) { // Check if triggerAIResponses returned null
+              console.error("[performTax] triggerAIResponses returned null. Reverting.");
+              return logAction(gameState, "[performTax] Error: Failed to trigger AI responses."); // Use original gameState
+         }
     } else {
         // No challengers, action succeeds
         console.log(`[performTax] No challengers. Action succeeds.`);
@@ -371,21 +433,25 @@ async function performTax(gameState: GameState, playerId: string): Promise<GameS
 }
 
 
-async function performAssassinate(gameState: GameState, playerId: string, targetId: string): Promise<GameState> {
+
+async function performAssassinate(gameState: GameState | null, playerId: string, targetId: string): Promise<GameState> {
+     if (!gameState) return createErrorState("[performAssassinate] Error: gameState is null.");
     console.log(`[performAssassinate] ${playerId} attempts Assassinate against ${targetId}.`);
     let newState = { ...gameState };
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     const target = getPlayerById(newState, targetId);
 
     if (playerIndex === -1 || !target) {
-        console.error(`[performAssassinate] Invalid player or target. PlayerIndex: ${playerIndex}, Target: ${!!target}`);
-        return newState;
+        const errorMsg = `[performAssassinate] Invalid player or target. PlayerIndex: ${playerIndex}, Target: ${!!target}`;
+        console.error(errorMsg);
+        return logAction(newState, errorMsg);
     }
     const player = newState.players[playerIndex];
 
     if (player.money < 3) {
-        console.warn(`[performAssassinate] Insufficient funds for ${playerId}.`);
-        return logAction(newState, `${player.name} cannot Assassinate (needs 3 coins).`);
+         const errorMsg = `${player.name} cannot Assassinate (needs 3 coins).`;
+         console.warn(`[performAssassinate] Insufficient funds for ${playerId}.`);
+        return logAction(newState, errorMsg);
     }
 
      // Deduct cost immediately upon attempt
@@ -408,29 +474,41 @@ async function performAssassinate(gameState: GameState, playerId: string, target
             responses: [],
         };
          newState = await triggerAIResponses(newState);
+         if (!newState) { // Check if triggerAIResponses returned null
+              console.error("[performAssassinate] triggerAIResponses returned null. Reverting.");
+              return logAction(gameState, "[performAssassinate] Error: Failed to trigger AI responses."); // Use original gameState
+         }
     } else {
         // No one can challenge or block, assassination proceeds immediately
          console.log(`[performAssassinate] No responders. Assassination succeeds.`);
         newState = logAction(newState, `${player.name}'s Assassination attempt automatically succeeds.`);
         const { newState: revealedState } = await revealInfluence(newState, targetId);
-        newState = revealedState;
+         newState = revealedState; // Assign revealedState directly
+         if (!newState) { // Check if revealInfluence returned null
+              console.error("[performAssassinate] revealInfluence returned null after auto-success. Reverting.");
+              return logAction(gameState, "[performAssassinate] Error: Failed to reveal influence after auto-success."); // Use original gameState
+         }
         newState = await advanceTurn(newState);
     }
      return newState;
 }
 
-async function performSteal(gameState: GameState, playerId: string, targetId: string): Promise<GameState> {
+
+async function performSteal(gameState: GameState | null, playerId: string, targetId: string): Promise<GameState> {
+     if (!gameState) return createErrorState("[performSteal] Error: gameState is null.");
     console.log(`[performSteal] ${playerId} attempts Steal from ${targetId}.`);
     let newState = { ...gameState };
     const player = getPlayerById(newState, playerId);
     const target = getPlayerById(newState, targetId);
 
     if (!player || !target) {
-        console.error(`[performSteal] Invalid player or target. Player: ${!!player}, Target: ${!!target}`);
-        return newState;
+        const errorMsg = `[performSteal] Invalid player or target. Player: ${!!player}, Target: ${!!target}`;
+        console.error(errorMsg);
+        return logAction(newState, errorMsg);
     }
      if (target.money === 0) {
-         newState = logAction(newState, `${player.name} attempts to Steal from ${target.name}, but they have no money.`);
+          const infoMsg = `${player.name} attempts to Steal from ${target.name}, but they have no money.`;
+         newState = logAction(newState, infoMsg);
          return await advanceTurn(newState); // Action effectively fails, advance turn
      }
 
@@ -449,29 +527,44 @@ async function performSteal(gameState: GameState, playerId: string, targetId: st
             responses: [],
         };
          newState = await triggerAIResponses(newState);
+         if (!newState) { // Check if triggerAIResponses returned null
+              console.error("[performSteal] triggerAIResponses returned null. Reverting.");
+              return logAction(gameState, "[performSteal] Error: Failed to trigger AI responses."); // Use original gameState
+         }
     } else {
         // No one can challenge or block, steal succeeds
          console.log(`[performSteal] No responders. Steal succeeds.`);
         const amount = Math.min(2, target.money);
          const playerIndex = newState.players.findIndex(p => p.id === playerId);
          const targetIndex = newState.players.findIndex(p => p.id === targetId);
-         const playerNewMoney = newState.players[playerIndex].money + amount;
-         const targetNewMoney = newState.players[targetIndex].money - amount;
-         newState.players[playerIndex] = { ...newState.players[playerIndex], money: playerNewMoney };
-         newState.players[targetIndex] = { ...newState.players[targetIndex], money: targetNewMoney };
-
-        newState = logAction(newState, `${player.name} successfully Steals ${amount} coins from ${target.name}. ${player.name} now has ${playerNewMoney}, ${target.name} now has ${targetNewMoney}.`);
+         // Check indexes again in case state changed
+         if (playerIndex !== -1 && targetIndex !== -1) {
+            const playerNewMoney = newState.players[playerIndex].money + amount;
+            const targetNewMoney = newState.players[targetIndex].money - amount;
+            newState.players[playerIndex] = { ...newState.players[playerIndex], money: playerNewMoney };
+            newState.players[targetIndex] = { ...newState.players[targetIndex], money: targetNewMoney };
+            newState = logAction(newState, `${player.name} successfully Steals ${amount} coins from ${target.name}. ${player.name} now has ${playerNewMoney}, ${target.name} now has ${targetNewMoney}.`);
+         } else {
+              console.error(`[performSteal] Player or target index became invalid after potential state changes. PlayerIndex: ${playerIndex}, TargetIndex: ${targetIndex}`);
+              newState = logAction(newState, "[performSteal] Error processing steal after no responders.");
+         }
         newState = await advanceTurn(newState);
     }
      return newState;
 }
 
 
-async function performExchange(gameState: GameState, playerId: string): Promise<GameState> {
+
+async function performExchange(gameState: GameState | null, playerId: string): Promise<GameState> {
+      if (!gameState) return createErrorState("[performExchange] Error: gameState is null.");
      console.log(`[performExchange] ${playerId} attempts Exchange.`);
      let newState = { ...gameState };
      const player = getPlayerById(newState, playerId);
-     if (!player) return newState;
+      if (!player) {
+          const errorMsg = `[performExchange] Error: Player ${playerId} not found.`;
+          console.error(errorMsg);
+          return logAction(newState, errorMsg);
+      }
 
      newState = logAction(newState, `${player.name} attempts Exchange.`);
      const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
@@ -485,16 +578,26 @@ async function performExchange(gameState: GameState, playerId: string): Promise<
             responses: [],
         };
         newState = await triggerAIResponses(newState);
+        if (!newState) { // Check if triggerAIResponses returned null
+              console.error("[performExchange] triggerAIResponses returned null. Reverting.");
+              return logAction(gameState, "[performExchange] Error: Failed to trigger AI responses."); // Use original gameState
+         }
     } else {
         // No challengers, exchange proceeds
          console.log(`[performExchange] No challengers. Initiating exchange.`);
         newState = await initiateExchange(newState, player); // Make initiateExchange async
+         if (!newState) { // Check if initiateExchange returned null
+              console.error("[performExchange] initiateExchange returned null. Reverting.");
+              return logAction(gameState, "[performExchange] Error: Failed to initiate exchange."); // Use original gameState
+         }
         // Turn doesn't advance until exchange is complete
     }
     return newState;
 }
 
-async function initiateExchange(gameState: GameState, player: Player): Promise<GameState> {
+
+async function initiateExchange(gameState: GameState | null, player: Player): Promise<GameState> {
+     if (!gameState) return createErrorState(`[initiateExchange] Error: gameState is null for player ${player?.id}.`);
     console.log(`[initiateExchange] Initiating exchange for ${player.name}.`);
     let newState = { ...gameState };
     const { card: card1, remainingDeck: deckAfter1 } = drawCard(newState.deck);
@@ -517,6 +620,10 @@ async function initiateExchange(gameState: GameState, player: Player): Promise<G
     if(player.isAI) {
         console.log(`[initiateExchange] Player ${player.name} is AI. Handling AI exchange.`);
         newState = await handleAIExchange(newState); // Make handleAIExchange async
+        if (!newState) { // Check if handleAIExchange returned null
+              console.error("[initiateExchange] handleAIExchange returned null. Reverting.");
+              return logAction(gameState, "[initiateExchange] Error: Failed to handle AI exchange."); // Use original gameState
+         }
     } else {
         console.log(`[initiateExchange] Player ${player.name} is Human. Waiting for UI selection.`);
     }
@@ -525,22 +632,27 @@ async function initiateExchange(gameState: GameState, player: Player): Promise<G
     return newState;
 }
 
-async function completeExchange(gameState: GameState, playerId: string, cardsToKeep: CardType[]): Promise<GameState> {
+
+async function completeExchange(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState> {
+    if (!gameState) return createErrorState(`[completeExchange] Error: gameState is null for player ${playerId}.`);
     console.log(`[completeExchange] Player ${playerId} completes exchange, keeping: ${cardsToKeep.join(', ')}.`);
     let newState = { ...gameState };
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     const exchangeInfo = newState.pendingExchange;
 
     if (playerIndex === -1 || !exchangeInfo || exchangeInfo.player.id !== playerId) {
-        console.error("[completeExchange] Invalid state for completing exchange. Phase:", exchangeInfo);
-        return newState;
+        const errorMsg = `[completeExchange] Invalid state for completing exchange. Phase: ${JSON.stringify(exchangeInfo)}`;
+        console.error(errorMsg);
+         newState.pendingExchange = null; // Attempt to clear invalid phase
+        return logAction(newState, errorMsg);
     }
     const player = newState.players[playerIndex];
 
     const originalUnrevealedCount = player.influence.filter(c => !c.revealed).length;
 
     if (cardsToKeep.length !== originalUnrevealedCount) {
-        console.error(`[completeExchange] Exchange error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${originalUnrevealedCount}. Cards chosen: ${cardsToKeep.join(',')}. Cards available: ${exchangeInfo.cardsToChoose.join(',')}`);
+        const errorMsg = `[completeExchange] Exchange error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${originalUnrevealedCount}. Cards chosen: ${cardsToKeep.join(',')}. Cards available: ${exchangeInfo.cardsToChoose.join(',')}`;
+        console.error(errorMsg);
          newState = logAction(newState, `Error: ${player.name} did not select the correct number of cards (${originalUnrevealedCount}) for exchange. Selection cancelled.`);
          // Don't advance turn, let player retry? Or handle error more gracefully.
          // For now, clear pending state to avoid getting stuck.
@@ -585,9 +697,11 @@ async function completeExchange(gameState: GameState, playerId: string, cardsToK
     return await advanceTurn(newState);
 }
 
+
 // --- Challenge/Block Resolution ---
 
 async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState> {
+     // No null check needed here, called internally by functions that already check
     console.log(`[resolveChallengeOrBlock] Resolving phase for action: ${gameState.challengeOrBlockPhase?.action}`);
     let newState = { ...gameState };
     const phase = newState.challengeOrBlockPhase;
@@ -596,9 +710,19 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
         return newState; // Should not happen if called correctly
     }
 
-    const actionPlayer = getPlayerById(newState, phase.actionPlayer.id)!; // Get updated player state
+    const actionPlayer = getPlayerById(newState, phase.actionPlayer.id);
+    const targetPlayer = phase.targetPlayer ? getPlayerById(newState, phase.targetPlayer.id) : undefined;
+     // Safety check if players were somehow removed during the phase (unlikely)
+     if (!actionPlayer) {
+         const errorMsg = `[resolveChallengeOrBlock] Error: Action player ${phase.actionPlayer.id} not found during resolution.`;
+         console.error(errorMsg);
+         newState.challengeOrBlockPhase = null; // Clear invalid phase
+         return logAction(newState, errorMsg);
+     }
+
+
     const action = phase.action;
-    const targetPlayer = phase.targetPlayer ? getPlayerById(newState, phase.targetPlayer.id) : undefined; // Get updated target state
+
 
     const challenges = phase.responses.filter(r => r.response === 'Challenge');
     const blocks = phase.responses.filter(r => (r.response as BlockActionType).startsWith('Block'));
@@ -615,18 +739,34 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
         console.log(`[resolveChallengeOrBlock] Challenge found from ${challengerId}.`);
         // Pass the *original* action and players from the phase data, but use current game state
         newState = await resolveChallenge(newState, phase.actionPlayer.id, challengerId, action);
+        if (!newState) { // Check if resolveChallenge returned null
+              console.error("[resolveChallengeOrBlock] resolveChallenge returned null. Reverting.");
+              return logAction(gameState, "[resolveChallengeOrBlock] Error: Failed to resolve challenge."); // Use original gameState BEFORE phase was cleared
+         }
     } else if (blocks.length > 0) {
         // Handle Block (only one block happens, but it could be challenged)
         const blockerId = blocks[0].playerId;
         const blockType = blocks[0].response as BlockActionType;
         console.log(`[resolveChallengeOrBlock] Block found from ${blockerId} (${blockType}).`);
         // resolveBlock sets up the next challenge phase (challenge the block)
-        newState = await resolveBlock(newState, actionPlayer, targetPlayer, blockerId, action as ActionType, blockType); // action must be ActionType here
+        // Pass the potentially updated actionPlayer state
+        const currentActionPlayer = getPlayerById(newState, actionPlayer.id)!; // Refresh action player state
+        newState = await resolveBlock(newState, currentActionPlayer, targetPlayer, blockerId, action as ActionType, blockType); // action must be ActionType here
+        if (!newState) { // Check if resolveBlock returned null
+              console.error("[resolveChallengeOrBlock] resolveBlock returned null. Reverting.");
+              return logAction(gameState, "[resolveChallengeOrBlock] Error: Failed to resolve block."); // Use original gameState BEFORE phase was cleared
+         }
     } else {
         // No challenges or blocks, action succeeds
         console.log(`[resolveChallengeOrBlock] No challenges or blocks. Action ${action} succeeds.`);
-        newState = logAction(newState, `No challenges or blocks. ${actionPlayer.name}'s ${action} attempt succeeds.`);
-        newState = await executeSuccessfulAction(newState, actionPlayer, action as ActionType, targetPlayer); // action must be ActionType here
+        // Refresh action player state before executing
+        const currentActionPlayer = getPlayerById(newState, actionPlayer.id)!;
+        newState = logAction(newState, `No challenges or blocks. ${currentActionPlayer.name}'s ${action} attempt succeeds.`);
+        newState = await executeSuccessfulAction(newState, currentActionPlayer, action as ActionType, targetPlayer); // action must be ActionType here
+         if (!newState) { // Check if executeSuccessfulAction returned null
+              console.error("[resolveChallengeOrBlock] executeSuccessfulAction returned null after no challenge/block. Reverting.");
+              return logAction(gameState, "[resolveChallengeOrBlock] Error: Failed to execute successful action."); // Use original gameState BEFORE phase was cleared
+         }
     }
 
     console.log(`[resolveChallengeOrBlock] Phase resolution complete.`);
@@ -634,30 +774,52 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
 }
 
 
+
 async function resolveChallenge(gameState: GameState, challengedPlayerId: string, challengerId: string, action: ActionType | BlockActionType): Promise<GameState> {
+    // No null check needed here, called internally by functions that already check
     console.log(`[resolveChallenge] ${challengerId} challenges ${challengedPlayerId}'s claim for ${action}.`);
     let newState = { ...gameState };
-    const challengedPlayer = getPlayerById(newState, challengedPlayerId)!;
-    const challenger = getPlayerById(newState, challengerId)!;
+    const stateBeforeResolve = { ...gameState }; // For fallback
+    const challengedPlayer = getPlayerById(newState, challengedPlayerId);
+    const challenger = getPlayerById(newState, challengerId);
+
+     // Safety Checks
+     if (!challengedPlayer || !challenger) {
+         const errorMsg = `[resolveChallenge] Error: Challenged player (${challengedPlayerId}) or Challenger (${challengerId}) not found.`;
+         console.error(errorMsg);
+         return logAction(newState, errorMsg);
+     }
+
 
     const requiredCard = getCardForAction(action);
 
     if (!requiredCard) {
-         console.error(`[resolveChallenge] Error: Action/Block ${action} cannot be challenged (or logic error).`);
-         newState = logAction(newState, `Error: Action/Block ${action} cannot be challenged (or logic error).`);
+         const errorMsg = `[resolveChallenge] Error: Action/Block ${action} cannot be challenged (or logic error).`;
+         console.error(errorMsg);
+         newState = logAction(newState, errorMsg);
          // Action proceeds as if unchallenged? Or halt? Assuming action proceeds.
          // Need to know if it was an action or block being challenged...
+          // Retrieve original target from the *current action* if available, as phase is cleared
+          // Use the state *before* this function call for currentAction context
+          const originalCurrentAction = stateBeforeResolve.currentAction;
+          const originalTarget = getPlayerById(newState, originalCurrentAction?.target?.id || '');
+
          if(action.startsWith('Block ')) { // Challenged a block
               const originalAction = getActionFromBlock(action as BlockActionType);
-              const originalActionPlayer = getPlayerById(newState, newState.currentAction?.player?.id || ''); // Get original player from currentAction
+              // Get original player from original currentAction
+              const originalActionPlayer = getPlayerById(newState, originalCurrentAction?.player?.id || '');
               if (originalAction && originalActionPlayer) {
-                newState = logAction(newState, `Challenge on block failed due to error. ${challengedPlayer.name}'s block succeeds. ${originalActionPlayer?.name}'s ${originalAction} is cancelled.`);
+                newState = logAction(newState, `Challenge on block failed due to error. ${challengedPlayer.name}'s block succeeds. ${originalActionPlayer.name}'s ${originalAction} is cancelled.`);
               } else {
                 newState = logAction(newState, `Challenge on block failed due to error. Block succeeds, original action cancelled.`);
               }
               newState = await advanceTurn(newState);
          } else { // Challenged an action
-             newState = await executeSuccessfulAction(newState, challengedPlayer, action as ActionType, getPlayerById(newState, newState.currentAction?.target?.id || '')); // Use currentAction target if exists
+              newState = await executeSuccessfulAction(newState, challengedPlayer, action as ActionType, originalTarget);
+              if (!newState) { // Check if executeSuccessfulAction returned null
+                 console.error("[resolveChallenge] executeSuccessfulAction returned null after challenge error. Reverting.");
+                 return logAction(stateBeforeResolve, "[resolveChallenge] Error executing action after challenge error.");
+             }
          }
          return newState;
     }
@@ -700,8 +862,17 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
 
 
             } else {
-                 newState = logAction(newState, `Error: ${challengedPlayer.name} had ${cardToReveal} but couldn't find unrevealed instance?`);
-                  console.error(`[resolveChallenge] Logic error: Cannot find unrevealed ${cardToReveal} for ${challengedPlayer.name}`);
+                 const errorMsg = `Error: ${challengedPlayer.name} had ${cardToReveal} but couldn't find unrevealed instance?`;
+                 newState = logAction(newState, errorMsg);
+                 console.error(`[resolveChallenge] Logic error: Cannot find unrevealed ${cardToReveal} for ${challengedPlayer.name}`);
+                  // As a fallback, reveal *any* unrevealed card to prevent game getting stuck
+                 const { newState: revealFallbackState } = await revealInfluence(newState, challengedPlayerId);
+                 newState = revealFallbackState;
+                 if (!newState) {
+                     console.error("[resolveChallenge] Fallback revealInfluence returned null. Reverting.");
+                     return logAction(stateBeforeResolve, "[resolveChallenge] Error: Failed to fallback reveal influence.");
+                 }
+
             }
         }
 
@@ -709,13 +880,25 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
         newState = logAction(newState, `${challenger.name} loses the challenge and must reveal influence.`);
          console.log(`[resolveChallenge] Challenger ${challenger.name} must reveal.`);
         const { newState: revealedState } = await revealInfluence(newState, challengerId); // await reveal
-        newState = revealedState;
+         newState = revealedState; // Assign revealedState directly
+         if (!newState) { // Check if revealInfluence returned null
+             console.error("[resolveChallenge] revealInfluence returned null for challenger. Reverting.");
+             return logAction(stateBeforeResolve, "[resolveChallenge] Error: Failed to reveal challenger influence.");
+         }
 
         // Check if challenger eliminated before proceeding
         const challengerStillActive = getActivePlayers(newState).some(p => p.id === challengerId);
-        const challengedActionPlayer = getPlayerById(newState, challengedPlayerId)!; // Get potentially updated state
+        const challengedActionPlayer = getPlayerById(newState, challengedPlayerId); // Get potentially updated state
+          if (!challengedActionPlayer) { // Safety check
+               const errorMsg = `[resolveChallenge] Error: Challenged player ${challengedPlayerId} not found after challenger reveal.`;
+               console.error(errorMsg);
+               return logAction(newState, errorMsg);
+           }
          // Retrieve original target from the *current action* if available, as phase is cleared
-        const originalTarget = getPlayerById(newState, newState.currentAction?.target?.id || '');
+         // Use the state *before* this function call for currentAction context
+          const originalCurrentAction = stateBeforeResolve.currentAction;
+          const originalTarget = getPlayerById(newState, originalCurrentAction?.target?.id || '');
+
 
         if (!challengerStillActive) {
             console.log(`[resolveChallenge] Challenger ${challenger.name} eliminated by failed challenge.`);
@@ -730,11 +913,12 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
         }
 
          // If challenge failed, the original action/block proceeds
-         console.log(`[resolveChallenge] Challenge failed. Original claim (${action}) by ${challengedPlayer.name} proceeds.`);
+         console.log(`[resolveChallenge] Challenge failed. Original claim (${action}) by ${challengedActionPlayer.name} proceeds.`);
          if (action.startsWith('Block ')) {
              // Block was challenged and proven true, block succeeds, original action fails
              const originalAction = getActionFromBlock(action as BlockActionType);
-              const originalActionPlayer = getPlayerById(newState, newState.currentAction?.player?.id || ''); // Get original player from currentAction
+               // Get original player from original currentAction
+              const originalActionPlayer = getPlayerById(newState, originalCurrentAction?.player?.id || '');
               if (originalAction && originalActionPlayer) {
                  newState = logAction(newState, `${challengedActionPlayer.name}'s block is successful. ${originalActionPlayer.name}'s ${originalAction} is cancelled.`);
               } else {
@@ -744,6 +928,10 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
          } else {
               // Action was challenged and proven true, action proceeds
               newState = await executeSuccessfulAction(newState, challengedActionPlayer, action as ActionType, originalTarget);
+               if (!newState) { // Check if executeSuccessfulAction returned null
+                 console.error("[resolveChallenge] executeSuccessfulAction returned null after failed challenge. Reverting.");
+                 return logAction(stateBeforeResolve, "[resolveChallenge] Error executing action after failed challenge.");
+             }
          }
 
 
@@ -752,7 +940,11 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
         newState = logAction(newState, `${challengedPlayer.name} cannot prove the challenge with ${requiredCard} ${action === 'Block Stealing' ? `or ${getAlternateCardForStealBlock()}`: ''} and loses influence.`);
         // Challenged player loses influence because they bluffed
         const { newState: revealedState } = await revealInfluence(newState, challengedPlayerId); // await reveal
-        newState = revealedState;
+        newState = revealedState; // Assign revealedState directly
+        if (!newState) { // Check if revealInfluence returned null
+             console.error("[resolveChallenge] revealInfluence returned null for challenged player. Reverting.");
+             return logAction(stateBeforeResolve, "[resolveChallenge] Error: Failed to reveal challenged player influence.");
+         }
 
         // Check if challenged player eliminated
          const challengedStillActive = getActivePlayers(newState).some(p => p.id === challengedPlayerId);
@@ -770,17 +962,26 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
          }
           // Action/Block fails because bluff was called.
           console.log(`[resolveChallenge] Bluff called. ${challengedPlayer.name}'s claim for ${action} fails.`);
+          // Retrieve original context from state before the call
+           const originalCurrentAction = stateBeforeResolve.currentAction;
+
          if (action.startsWith('Block ')) {
               // Block was challenged and failed, original action proceeds
               const originalAction = getActionFromBlock(action as BlockActionType);
-              const originalActionPlayer = getPlayerById(newState, newState.currentAction?.player?.id || ''); // Get original player from currentAction
-               const originalTarget = getPlayerById(newState, newState.currentAction?.target?.id || '');
+              // Get original player/target from original currentAction
+               const originalActionPlayer = getPlayerById(newState, originalCurrentAction?.player?.id || '');
+               const originalTarget = getPlayerById(newState, originalCurrentAction?.target?.id || '');
                if (originalAction && originalActionPlayer) {
                    newState = logAction(newState, `${challengedPlayer.name}'s block fails. ${originalActionPlayer.name}'s ${originalAction} proceeds.`);
                    newState = await executeSuccessfulAction(newState, originalActionPlayer, originalAction, originalTarget);
+                    if (!newState) { // Check if executeSuccessfulAction returned null
+                         console.error("[resolveChallenge] executeSuccessfulAction returned null after successful block challenge. Reverting.");
+                         return logAction(stateBeforeResolve, "[resolveChallenge] Error executing action after successful block challenge.");
+                    }
                } else {
-                    console.error(`[resolveChallenge] Error retrieving original action/player after failed block.`);
-                    newState = logAction(newState, `Error retrieving original action/player after failed block challenge.`);
+                    const errorMsg = `[resolveChallenge] Error retrieving original action/player after failed block challenge.`;
+                    console.error(errorMsg);
+                    newState = logAction(newState, errorMsg);
                     newState = await advanceTurn(newState);
                }
          } else {
@@ -794,26 +995,33 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
 }
 
 
+
 // This function is deprecated and logic is merged into resolveChallenge
 // async function resolveBlockChallenge(...)
 
 
 async function resolveBlock(gameState: GameState, actionPlayer: Player, targetPlayer: Player | undefined, blockerId: string, action: ActionType, blockType: BlockActionType): Promise<GameState> {
+    // No null check needed here, called internally by functions that already check
     console.log(`[resolveBlock] ${blockerId} blocks ${actionPlayer.name}'s ${action} with ${blockType}.`);
     let newState = { ...gameState };
-    const blocker = getPlayerById(newState, blockerId)!;
+    const blocker = getPlayerById(newState, blockerId);
+    const currentActionPlayer = getPlayerById(newState, actionPlayer.id); // Refresh action player state
+
+    // Safety checks
+     if (!blocker || !currentActionPlayer) {
+         const errorMsg = `[resolveBlock] Error: Blocker (${blockerId}) or Action Player (${actionPlayer.id}) not found.`;
+         console.error(errorMsg);
+         return logAction(newState, errorMsg);
+     }
+
 
      // Block is announced, now the original actionPlayer can challenge the block claim
-     newState = logAction(newState, `${actionPlayer.name} can now challenge ${blocker.name}'s attempt to ${blockType}.`);
+     newState = logAction(newState, `${currentActionPlayer.name} can now challenge ${blocker.name}'s attempt to ${blockType}.`);
       console.log(`[resolveBlock] Setting up challenge phase for the block claim.`);
-
-     // Need to pass the *current* state of the blocker and action player
-     const currentBlocker = getPlayerById(newState, blockerId)!;
-     const currentActionPlayer = getPlayerById(newState, actionPlayer.id)!;
 
      // The "action" being challenged now is the BLOCK itself
      newState.challengeOrBlockPhase = {
-         actionPlayer: currentBlocker, // The blocker is now the one whose claim (the block) can be challenged
+         actionPlayer: blocker, // The blocker is now the one whose claim (the block) can be challenged
          action: blockType as any, // Treat block as an action for challenge check (cast needed)
          targetPlayer: currentActionPlayer, // The target of the "block action" challenge is the original action player
          possibleResponses: [currentActionPlayer], // Only the original action player can challenge the block
@@ -823,14 +1031,21 @@ async function resolveBlock(gameState: GameState, actionPlayer: Player, targetPl
      // Trigger AI/Player response for the challenge against the block
       console.log(`[resolveBlock] Triggering responses for challenge-the-block.`);
      newState = await triggerAIResponses(newState); // Will handle both AI and Human (by waiting)
+      if (!newState) { // Check if triggerAIResponses returned null
+         console.error("[resolveBlock] triggerAIResponses returned null. Reverting.");
+         return logAction(gameState, "[resolveBlock] Error: Failed to trigger AI responses for block challenge."); // Use original gameState
+     }
 
      return newState; // State waits for challenge decision against the block
 }
 
 
-async function executeSuccessfulAction(gameState: GameState, player: Player, action: ActionType, target?: Player): Promise<GameState> {
+
+async function executeSuccessfulAction(gameState: GameState | null, player: Player, action: ActionType, target?: Player): Promise<GameState> {
+     if (!gameState) return createErrorState(`[executeSuccessfulAction] Error: gameState is null for player ${player?.id}.`);
     console.log(`[executeSuccessfulAction] Executing successful ${action} for ${player.name}${target ? ` targeting ${target.name}`: ''}.`);
     let newState = { ...gameState };
+    const stateBeforeExecute = { ...gameState }; // Fallback
     const playerIndex = newState.players.findIndex(p => p.id === player.id);
     const targetIndex = target ? newState.players.findIndex(p => p.id === target.id) : -1;
 
@@ -842,8 +1057,9 @@ async function executeSuccessfulAction(gameState: GameState, player: Player, act
     // Refresh player state
     const currentPlayer = playerIndex !== -1 ? newState.players[playerIndex] : undefined;
      if (!currentPlayer) {
-         console.error(`[executeSuccessfulAction] Player ${player.id} not found in current state.`);
-         return newState;
+          const errorMsg = `[executeSuccessfulAction] Error: Player ${player.id} not found in current state.`;
+          console.error(errorMsg);
+         return logAction(newState, errorMsg);
      }
 
     switch (action) {
@@ -877,12 +1093,19 @@ async function executeSuccessfulAction(gameState: GameState, player: Player, act
                   console.log(`[executeSuccessfulAction] Assassination success against ${currentTarget.name}. Target must reveal.`);
                  newState = logAction(newState, `Assassination against ${currentTarget.name} succeeds.`);
                  const { newState: revealedState } = await revealInfluence(newState, currentTarget.id); // await reveal
-                 newState = revealedState;
+                 newState = revealedState; // Assign directly
+                 if (!newState) { // Check if reveal returned null
+                    console.error("[executeSuccessfulAction] revealInfluence returned null after Assassinate success. Reverting.");
+                    return logAction(stateBeforeExecute, "[executeSuccessfulAction] Error revealing influence after Assassinate.");
+                 }
              } else if (targetIndex !== -1 && (!targetStillActive || !currentTarget)) {
-                  console.log(`[executeSuccessfulAction] Assassination target ${target?.name || targetId} was already eliminated or not found.`);
-                  newState = logAction(newState, `Assassination target ${target?.name || targetId} was already eliminated.`);
-             } else if (playerIndex === -1) {
-                 console.error(`[executeSuccessfulAction] Assassin ${player.id} not found.`);
+                  const infoMsg = `Assassination target ${target?.name || target?.id} was already eliminated or not found.`;
+                  console.log(`[executeSuccessfulAction] ${infoMsg}`);
+                  newState = logAction(newState, infoMsg);
+             } else if (playerIndex === -1) { // Should be caught earlier, but safety check
+                  const errorMsg = `[executeSuccessfulAction] Assassin ${player.id} not found.`;
+                  console.error(errorMsg);
+                  newState = logAction(newState, errorMsg);
              }
               newState = await advanceTurn(newState);
              break;
@@ -897,25 +1120,34 @@ async function executeSuccessfulAction(gameState: GameState, player: Player, act
                      newState = logAction(newState, `${currentPlayer.name} successfully stole ${amount} coins from ${currentTarget.name}. ${currentPlayer.name} now has ${playerNewMoney}, ${currentTarget.name} now has ${targetNewMoney}.`);
                       console.log(`[executeSuccessfulAction] Steal success. ${currentPlayer.name} now has ${playerNewMoney}, ${currentTarget.name} now has ${targetNewMoney}.`);
                  } else {
-                      newState = logAction(newState, `${currentPlayer.name} successfully stole from ${currentTarget.name}, but they had no coins.`);
+                     const infoMsg = `${currentPlayer.name} successfully stole from ${currentTarget.name}, but they had no coins.`;
+                      newState = logAction(newState, infoMsg);
                       console.log(`[executeSuccessfulAction] Steal success, but target ${currentTarget.name} had 0 coins.`);
                  }
              } else if(targetIndex !== -1 && (!targetStillActive || !currentTarget)) {
-                  console.log(`[executeSuccessfulAction] Steal target ${target?.name || targetId} was already eliminated or not found.`);
-                  newState = logAction(newState, `Steal target ${target?.name || targetId} was already eliminated.`);
-             } else if (playerIndex === -1) {
-                  console.error(`[executeSuccessfulAction] Stealer ${player.id} not found.`);
+                  const infoMsg = `Steal target ${target?.name || target?.id} was already eliminated or not found.`;
+                  console.log(`[executeSuccessfulAction] ${infoMsg}`);
+                  newState = logAction(newState, infoMsg);
+             } else if (playerIndex === -1) { // Safety check
+                  const errorMsg = `[executeSuccessfulAction] Stealer ${player.id} not found.`;
+                  console.error(errorMsg);
+                  newState = logAction(newState, errorMsg);
              }
               newState = await advanceTurn(newState);
             break;
         case 'Exchange':
              console.log(`[executeSuccessfulAction] Exchange approved, initiating exchange process for ${currentPlayer.name}.`);
             newState = await initiateExchange(newState, currentPlayer); // await exchange initiation
+            if (!newState) { // Check if initiateExchange returned null
+                 console.error("[executeSuccessfulAction] initiateExchange returned null. Reverting.");
+                 return logAction(stateBeforeExecute, "[executeSuccessfulAction] Error initiating exchange.");
+            }
              // Turn advances after exchange completion (handled in completeExchange)
             break;
         // Income and Coup are handled directly and don't go through challenge phase or this function
         default:
-             console.warn(`[executeSuccessfulAction] Action ${action} completed successfully (no specific execution logic needed here).`);
+             const warnMsg = `[executeSuccessfulAction] Action ${action} completed successfully (no specific execution logic needed here).`;
+             console.warn(warnMsg);
              newState = logAction(newState, `Action ${action} completed successfully.`);
              newState = await advanceTurn(newState);
     }
@@ -924,7 +1156,9 @@ async function executeSuccessfulAction(gameState: GameState, player: Player, act
 }
 
 
-async function advanceTurn(gameState: GameState): Promise<GameState> {
+
+async function advanceTurn(gameState: GameState | null): Promise<GameState> {
+    if (!gameState) return createErrorState("[advanceTurn] Error: gameState is null.");
     console.log("[advanceTurn] Advancing turn...");
     let newState = { ...gameState };
 
@@ -955,6 +1189,11 @@ async function advanceTurn(gameState: GameState): Promise<GameState> {
     const nextPlayerIndex = getNextPlayerIndex(newState.currentPlayerIndex, newState.players);
      newState.currentPlayerIndex = nextPlayerIndex;
     const nextPlayer = newState.players[nextPlayerIndex];
+     if (!nextPlayer) { // Safety check
+          const errorMsg = `[advanceTurn] Error: Could not find next player at index ${nextPlayerIndex}.`;
+          console.error(errorMsg);
+          return logAction(newState, errorMsg); // Log error and return current state to avoid crash
+     }
     newState = logAction(newState, `--- ${nextPlayer.name}'s turn ---`);
     console.log(`[advanceTurn] New turn for player index ${nextPlayerIndex}: ${nextPlayer.name} (${nextPlayer.isAI ? 'AI' : 'Human'})`);
 
@@ -972,6 +1211,7 @@ async function advanceTurn(gameState: GameState): Promise<GameState> {
 
     return newState; // Return the updated state.
 }
+
 
 
 function getCardForAction(action: ActionType | BlockActionType): CardType | null {
@@ -1101,31 +1341,36 @@ function generateGameStateDescription(gameState: GameState, aiPlayerId: string):
      }
      const logEntries = gameState.actionLog.slice(-5); // Get last 5 entries
      description += `Recent Action Log Summary (${logEntries.length} entries):\n${logEntries.map(l => `  - ${l}`).join('\n')}\n`; // Last 5 log entries
-    description += `It is currently ${gameState.players[gameState.currentPlayerIndex].name}'s turn.\n`;
+    description += `It is currently ${gameState.players[gameState.currentPlayerIndex]?.name || 'Unknown'}'s turn.\n`;
     return description;
 }
 
 
 // Export handleAIAction so it can be called by page.tsx for the first turn or via button trigger
-export async function handleAIAction(gameState: GameState): Promise<GameState> {
-    console.log(`[handleAIAction] >>> Entering for ${gameState.players[gameState.currentPlayerIndex].name}`);
+export async function handleAIAction(gameState: GameState | null): Promise<GameState | null> { // Return GameState | null
+    if (!gameState) return createErrorState("[handleAIAction] Error: gameState is null.");
+    console.log(`[handleAIAction] >>> Entering for ${gameState.players[gameState.currentPlayerIndex]?.name || 'UNKNOWN PLAYER'}`);
     let newState = { ...gameState }; // Make a copy to potentially return on error
+    const stateBeforeAIAction = { ...gameState }; // Fallback
     const aiPlayer = newState.players[newState.currentPlayerIndex];
 
     // Safety checks
     if (!aiPlayer || !aiPlayer.isAI) {
-         console.error(`[handleAIAction] Error: Called for non-AI player (${aiPlayer?.name}) or invalid player index (${newState.currentPlayerIndex}).`);
+         const errorMsg = `[handleAIAction] Error: Called for non-AI player (${aiPlayer?.name}) or invalid player index (${newState.currentPlayerIndex}).`;
+         console.error(errorMsg);
          newState.needsHumanTriggerForAI = false; // Ensure flag is off if error
-         return newState; // Return current (copied) state
+         return logAction(newState, errorMsg); // Return state with error logged
     }
      if (!aiPlayer.influence.some(c => !c.revealed)) {
-         console.log(`[handleAIAction] AI ${aiPlayer.name} is eliminated. Advancing turn.`);
+         const infoMsg = `[handleAIAction] AI ${aiPlayer.name} is eliminated. Advancing turn.`;
+         console.log(infoMsg);
          // Need to advance turn *from* this state
          newState.needsHumanTriggerForAI = false; // Ensure flag is off before advancing
          return await advanceTurn(newState); // Skip turn if AI is eliminated
      }
      if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.winner) {
-         console.log(`[handleAIAction] AI ${aiPlayer.name}'s turn skipped: Ongoing phase or game over. Phase: ${!!newState.challengeOrBlockPhase}, Exchange: ${!!newState.pendingExchange}, Winner: ${!!newState.winner}`);
+          const infoMsg = `[handleAIAction] AI ${aiPlayer.name}'s turn skipped: Ongoing phase or game over. Phase: ${!!newState.challengeOrBlockPhase}, Exchange: ${!!newState.pendingExchange}, Winner: ${!!newState.winner}`;
+         console.log(infoMsg);
          newState.needsHumanTriggerForAI = false; // Ensure flag is off
          return newState; // Don't act if in another phase
      }
@@ -1137,7 +1382,8 @@ export async function handleAIAction(gameState: GameState): Promise<GameState> {
     const availableActions = getAvailableActions(aiPlayer, newState);
      if (availableActions.length === 0) {
          // This should theoretically only happen if must Coup but no targets, or eliminated.
-         console.log(`[handleAIAction] AI ${aiPlayer.name} has no available actions (Eliminated or no Coup targets?). Advancing turn.`);
+          const infoMsg = `[handleAIAction] AI ${aiPlayer.name} has no available actions (Eliminated or no Coup targets?). Advancing turn.`;
+         console.log(infoMsg);
          return await advanceTurn(newState);
      }
 
@@ -1152,6 +1398,7 @@ export async function handleAIAction(gameState: GameState): Promise<GameState> {
         }));
 
     let stateAfterAction: GameState | null = null; // Use null to indicate potential failure
+    let aiDecisionAction: ActionType | null = null; // Track chosen action for error reporting
 
     try {
         console.log(`[handleAIAction] Requesting action selection for ${aiPlayer.name} from AI service...`);
@@ -1167,10 +1414,11 @@ export async function handleAIAction(gameState: GameState): Promise<GameState> {
 
 
         // Validate AI action choice
-        const chosenAction = aiDecision.action as ActionType;
-         if (!availableActions.includes(chosenAction)) {
-            console.warn(`[handleAIAction] AI ${aiPlayer.name} chose invalid action '${chosenAction}'. Available: [${availableActions.join(', ')}]. Defaulting to Income.`);
-             newState = logAction(newState, `AI (${aiPlayer.name}) chose invalid action '${chosenAction}'. Defaulting to Income.`);
+        aiDecisionAction = aiDecision.action as ActionType; // Store for potential error log
+         if (!availableActions.includes(aiDecisionAction)) {
+            const warnMsg = `[handleAIAction] AI ${aiPlayer.name} chose invalid action '${aiDecisionAction}'. Available: [${availableActions.join(', ')}]. Defaulting to Income.`;
+            console.warn(warnMsg);
+             newState = logAction(newState, warnMsg);
              stateAfterAction = await performIncome(newState, aiPlayer.id); // Default safe action
          } else {
               newState = logAction(newState, `AI (${aiPlayer.name}) Reasoning: ${aiDecision.reasoning}`);
@@ -1178,77 +1426,87 @@ export async function handleAIAction(gameState: GameState): Promise<GameState> {
 
               // Find target player if needed
               let targetPlayerId: string | undefined = undefined;
-              const needsTarget = ['Coup', 'Assassinate', 'Steal'].includes(chosenAction);
+              const needsTarget = ['Coup', 'Assassinate', 'Steal'].includes(aiDecisionAction);
 
               if (needsTarget) {
                    if (!aiDecision.target) {
-                        console.warn(`[handleAIAction] AI ${aiPlayer.name} chose ${chosenAction} but provided no target. Picking random active opponent.`);
+                        const warnMsg = `[handleAIAction] AI ${aiPlayer.name} chose ${aiDecisionAction} but provided no target. Picking random active opponent.`;
+                        console.warn(warnMsg);
                         const activeOpponents = getActivePlayers(newState).filter(p => p.id !== aiPlayer.id);
                         if (activeOpponents.length > 0) {
                             targetPlayerId = activeOpponents[Math.floor(Math.random() * activeOpponents.length)].id;
-                            newState = logAction(newState, `AI (${aiPlayer.name}) chose ${chosenAction} without target, targeting random opponent ${getPlayerById(newState, targetPlayerId)?.name}.`);
+                            newState = logAction(newState, `AI (${aiPlayer.name}) chose ${aiDecisionAction} without target, targeting random opponent ${getPlayerById(newState, targetPlayerId)?.name}.`);
                         } else {
-                             console.error(`[handleAIAction] AI ${aiPlayer.name} chose ${chosenAction}, needs target, but no active opponents! Defaulting to Income.`);
-                             newState = logAction(newState, `AI (${aiPlayer.name}) has no valid targets for ${chosenAction}. Choosing Income instead.`);
+                             const errorMsg = `[handleAIAction] AI ${aiPlayer.name} chose ${aiDecisionAction}, needs target, but no active opponents! Defaulting to Income.`;
+                             console.error(errorMsg);
+                             newState = logAction(newState, errorMsg);
                              stateAfterAction = await performIncome(newState, aiPlayer.id); // Default safe action
                              console.log(`[handleAIAction] <<< Exiting for ${aiPlayer.name} (Fallback Income)`);
-                             return stateAfterAction || newState; // Return fallback or original if fallback failed
+                             // Return fallback or original if fallback failed
+                             return stateAfterAction || logAction(stateBeforeAIAction, "Fallback Income failed.");
                         }
                    } else {
                        // AI provided target name, try to find ID among *active* opponents
                        const target = getActivePlayers(newState).find(p => p.name === aiDecision.target && p.id !== aiPlayer.id);
                        if (target) {
                            targetPlayerId = target.id;
-                           newState = logAction(newState, `AI (${aiPlayer.name}) chose action: ${chosenAction} targeting ${target.name}`); // Log valid target
-                           console.log(`[handleAIAction] Found target ${target.name} (${target.id}) for AI action ${chosenAction}.`);
+                           newState = logAction(newState, `AI (${aiPlayer.name}) chose action: ${aiDecisionAction} targeting ${target.name}`); // Log valid target
+                           console.log(`[handleAIAction] Found target ${target.name} (${target.id}) for AI action ${aiDecisionAction}.`);
                        } else {
-                           console.warn(`[handleAIAction] AI ${aiPlayer.name} target '${aiDecision.target}' not found among active opponents or is self. Picking random.`);
+                           const warnMsg = `[handleAIAction] AI ${aiPlayer.name} target '${aiDecision.target}' not found among active opponents or is self. Picking random.`;
+                           console.warn(warnMsg);
                            const activeOpponents = getActivePlayers(newState).filter(p => p.id !== aiPlayer.id);
                            if (activeOpponents.length > 0) {
                                targetPlayerId = activeOpponents[Math.floor(Math.random() * activeOpponents.length)].id;
                                newState = logAction(newState, `AI (${aiPlayer.name}) target '${aiDecision.target}' invalid, targeting random opponent ${getPlayerById(newState, targetPlayerId)?.name}.`);
                            } else {
-                               console.error(`[handleAIAction] AI ${aiPlayer.name} chose ${chosenAction}, target invalid, and no other active opponents! Defaulting to Income.`);
-                               newState = logAction(newState, `AI (${aiPlayer.name}) has no valid targets for ${chosenAction}. Choosing Income instead.`);
+                               const errorMsg = `[handleAIAction] AI ${aiPlayer.name} chose ${aiDecisionAction}, target invalid, and no other active opponents! Defaulting to Income.`;
+                               console.error(errorMsg);
+                               newState = logAction(newState, errorMsg);
                                stateAfterAction = await performIncome(newState, aiPlayer.id); // Default safe action
                                console.log(`[handleAIAction] <<< Exiting for ${aiPlayer.name} (Fallback Income)`);
-                               return stateAfterAction || newState; // Return fallback or original if fallback failed
+                               // Return fallback or original if fallback failed
+                               return stateAfterAction || logAction(stateBeforeAIAction, "Fallback Income failed.");
                            }
                        }
                    }
               } else {
                    // Action does not need a target
-                  newState = logAction(newState, `AI (${aiPlayer.name}) chose action: ${chosenAction}`);
+                  newState = logAction(newState, `AI (${aiPlayer.name}) chose action: ${aiDecisionAction}`);
               }
 
                // Perform the chosen action - This will handle challenges/blocks and eventually call advanceTurn itself
-               console.log(`[handleAIAction] --- Calling performAction for AI: PlayerID=${aiPlayer.id}, Action=${chosenAction}, TargetID=${targetPlayerId || 'N/A'} ---`);
-               stateAfterAction = await performAction(newState, aiPlayer.id, chosenAction, targetPlayerId);
-               console.log(`[handleAIAction] --- Returned from performAction for AI ${aiPlayer.name}'s ${chosenAction}. State updated. ---`);
+               console.log(`[handleAIAction] --- Calling performAction for AI: PlayerID=${aiPlayer.id}, Action=${aiDecisionAction}, TargetID=${targetPlayerId || 'N/A'} ---`);
+               stateAfterAction = await performAction(newState, aiPlayer.id, aiDecisionAction, targetPlayerId);
+               console.log(`[handleAIAction] --- Returned from performAction for AI ${aiPlayer.name}'s ${aiDecisionAction}. State updated. ---`);
 
          }
 
     } catch (error: any) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[handleAIAction] AI action selection/execution failed for ${aiPlayer.name}:`, errorMessage);
-        newState = logAction(newState, `AI (${aiPlayer.name}) encountered an error during action (${errorMessage}). Taking Income.`);
+        const errorMsgLog = `[handleAIAction] AI action selection/execution failed for ${aiPlayer.name}: ${errorMessage}. Action: ${aiDecisionAction || 'Unknown'}. Taking Income.`;
+        console.error(errorMsgLog);
+        newState = logAction(newState, errorMsgLog);
         stateAfterAction = await performIncome(newState, aiPlayer.id); // Fallback action
     }
      console.log(`[handleAIAction] <<< Exiting for ${aiPlayer.name}`);
      // Ensure we always return a valid GameState
      // Check the state returned by performAction first
     if (!stateAfterAction) {
-      console.error(`[handleAIAction] performAction returned null after AI action ${aiDecision.action}. Returning previous state.`);
-      return newState; // Return the state before the failed performAction call
+      const errorMsg = `[handleAIAction] performAction returned null after AI action ${aiDecisionAction}. Returning previous state.`;
+      console.error(errorMsg);
+      return logAction(stateBeforeAIAction, errorMsg); // Return the state before the failed performAction call
     }
     return stateAfterAction;
 }
 
 
 
+
 // Triggers AI responses during challenge/block phases. Returns the state *after* AIs have responded.
 // IMPORTANT: This function MODIFIES the state by calling handlePlayerResponse, and potentially resolveChallengeOrBlock.
-async function triggerAIResponses(gameState: GameState): Promise<GameState> {
+async function triggerAIResponses(gameState: GameState | null): Promise<GameState> {
+     if (!gameState) return createErrorState("[triggerAIResponses] Error: gameState is null.");
     let newState = { ...gameState };
     let currentPhase = newState.challengeOrBlockPhase; // Get the phase state *at the start*
     let stateBeforeLoop = { ...gameState }; // Keep original state for fallback
@@ -1265,7 +1523,17 @@ async function triggerAIResponses(gameState: GameState): Promise<GameState> {
             }
 
             // Get the most up-to-date state for the AI making the decision
-            const aiPlayerState = getPlayerById(newState, aiToAct.id)!; // Assume AI exists if in possibleResponses
+            const aiPlayerState = getPlayerById(newState, aiToAct.id);
+             if (!aiPlayerState) { // Safety check
+                 console.error(`[triggerAIResponses] Error: AI Responder ${aiToAct.id} not found in state. Skipping response.`);
+                 // Manually mark as responded to avoid infinite loop? Risky. Better to log and continue.
+                 // For now, just log and let the loop try the next AI or finish.
+                 // To prevent infinite loops if state is corrupt, maybe add a counter?
+                 currentPhase.responses.push({ playerId: aiToAct.id, response: 'Allow' }); // Force allow to prevent loop?
+                 newState = logAction(newState, `[triggerAIResponses] Error: AI ${aiToAct.id} not found. Forced 'Allow'.`);
+                 currentPhase = newState.challengeOrBlockPhase; // Refresh phase state
+                 continue; // Try next AI
+             }
             console.log(`[triggerAIResponses] AI Responder: ${aiPlayerState.name} needs to respond to ${currentPhase.actionPlayer.name}'s claim for ${currentPhase.action}`);
 
             let decision: GameResponseType = 'Allow'; // Default
@@ -1347,8 +1615,9 @@ async function triggerAIResponses(gameState: GameState): Promise<GameState> {
 
             } catch (error: any) {
                 const errorMessage = error instanceof Error ? error.message : String(error);
-                console.error(`AI response generation failed for ${aiPlayerState.name}:`, errorMessage);
-                newState = logAction(newState, `AI (${aiPlayerState.name}) encountered an error during response (${errorMessage}). Defaulting to Allow.`);
+                const errorMsgLog = `[triggerAIResponses] AI response generation failed for ${aiPlayerState.name}: ${errorMessage}. Defaulting to Allow.`;
+                console.error(errorMsgLog);
+                newState = logAction(newState, errorMsgLog);
                 decision = 'Allow';
                 reasoning = 'Error during decision process.';
                 decidedResponseType = 'Allow';
@@ -1359,7 +1628,15 @@ async function triggerAIResponses(gameState: GameState): Promise<GameState> {
 
             // IMPORTANT: Update the state by calling handlePlayerResponse, which correctly modifies the phase state
             // and potentially resolves the phase or sets up the next challenge.
-            newState = await handlePlayerResponse(newState, aiPlayerState.id, decision); // Await the handling
+             const stateAfterResponse = await handlePlayerResponse(newState, aiPlayerState.id, decision); // Await the handling
+              if (!stateAfterResponse) {
+                 console.error(`[triggerAIResponses] handlePlayerResponse returned null for AI ${aiPlayerState.name}'s response (${decision}). Breaking loop.`);
+                 // Attempt to revert to state *before* this AI's response
+                 newState = logAction(stateBeforeLoop, `[triggerAIResponses] Error processing AI ${aiPlayerState.name}'s response. Reverting phase state.`);
+                 newState.challengeOrBlockPhase = stateBeforeLoop.challengeOrBlockPhase; // Explicitly revert phase too
+                 break; // Exit the loop as state might be inconsistent
+             }
+             newState = stateAfterResponse; // Update newState with the result
 
 
             // Refresh phase state *after* the response has been handled
@@ -1381,12 +1658,17 @@ async function triggerAIResponses(gameState: GameState): Promise<GameState> {
 
             // If AI Allowed, loop continues to the next AI responder if any.
             console.log(`[triggerAIResponses] AI ${aiPlayerState.name} Allowed. Checking for more AI responders.`);
+             // Update stateBeforeLoop for the next iteration's fallback
+             stateBeforeLoop = { ...newState };
+
 
         } // End AI responder loop
     } catch (outerError: any) {
-        console.error("[triggerAIResponses] Critical error during AI response loop:", outerError);
+         const errorMsg = `[triggerAIResponses] Critical error during AI response loop: ${outerError.message}. Reverting phase.`;
+         console.error(errorMsg);
         // Attempt to return the state before the loop started to prevent inconsistent state
-        return logAction(stateBeforeLoop, `Critical error during AI response processing: ${outerError.message}. Reverting phase.`);
+        // Also log error to game state
+        return logAction(stateBeforeLoop, errorMsg);
     }
 
     // After the loop, check if the phase *still* exists and if all *possible* responders have responded.
@@ -1394,7 +1676,12 @@ async function triggerAIResponses(gameState: GameState): Promise<GameState> {
     const finalPhase = newState.challengeOrBlockPhase;
     if (finalPhase && finalPhase.possibleResponses.every(p => finalPhase.responses.some(r => r.playerId === p.id))) {
         console.log("[triggerAIResponses] All responses received (likely all 'Allow' or phase resolved differently). Resolving phase...");
-        newState = await resolveChallengeOrBlock(newState); // Resolve based on collected responses
+        const stateAfterResolve = await resolveChallengeOrBlock(newState); // Resolve based on collected responses
+         if (!stateAfterResolve) { // Check if resolve returned null
+             console.error("[triggerAIResponses] resolveChallengeOrBlock returned null after all responses. Reverting.");
+             return logAction(newState, "[triggerAIResponses] Error: Failed to resolve phase after all responses."); // Use state *before* calling resolve
+         }
+         newState = stateAfterResolve; // Update state with resolved state
     } else if (finalPhase) {
         console.log("[triggerAIResponses] Phase still requires responses (likely human). Waiting.");
     } else {
@@ -1405,15 +1692,19 @@ async function triggerAIResponses(gameState: GameState): Promise<GameState> {
 }
 
 
+
 // Async because it calls completeExchange which is async
-async function handleAIExchange(gameState: GameState): Promise<GameState> {
+async function handleAIExchange(gameState: GameState | null): Promise<GameState> {
+    if (!gameState) return createErrorState("[handleAIExchange] Error: gameState is null.");
     console.log(`[handleAIExchange] Handling exchange for AI.`);
     let newState = { ...gameState };
     const stateBeforeExchange = { ...gameState }; // Fallback state
     const exchangeInfo = newState.pendingExchange;
      if (!exchangeInfo || !exchangeInfo.player.isAI) {
-         console.error("[handleAIExchange] Error: Called without valid AI exchange phase.");
-         return newState;
+         const errorMsg = "[handleAIExchange] Error: Called without valid AI exchange phase.";
+         console.error(errorMsg);
+          if(newState) newState.pendingExchange = null; // Try to clear invalid phase
+         return logAction(newState || stateBeforeExchange, errorMsg); // Use newState if available, else fallback
      }
 
      const aiPlayer = exchangeInfo.player;
@@ -1435,13 +1726,17 @@ async function handleAIExchange(gameState: GameState): Promise<GameState> {
 
     try {
         newState = logAction(newState, `AI (${aiPlayer.name}) chooses [${cardsToKeep.join(', ')}] for Exchange.`);
-        newState = await completeExchange(newState, aiPlayer.id, cardsToKeep); // await completion
+        const stateAfterCompletion = await completeExchange(newState, aiPlayer.id, cardsToKeep); // await completion
+         if (!stateAfterCompletion) { // Check if completeExchange returned null
+             console.error("[handleAIExchange] completeExchange returned null. Reverting.");
+             return logAction(stateBeforeExchange, "[handleAIExchange] Error completing AI exchange.");
+         }
+         newState = stateAfterCompletion; // Update state
     } catch (error: any) {
-         console.error(`[handleAIExchange] Error during completeExchange: ${error.message}`);
-         newState = logAction(stateBeforeExchange, `Error during AI exchange completion: ${error.message}. Reverting exchange.`);
-         newState.pendingExchange = null; // Clear broken phase
-         // Consider advancing turn here to prevent deadlock
-         // newState = await advanceTurn(newState);
+         const errorMsg = `[handleAIExchange] Error during completeExchange: ${error.message}. Reverting exchange.`;
+         console.error(errorMsg);
+         newState = logAction(stateBeforeExchange, errorMsg);
+          if(newState) newState.pendingExchange = null; // Clear broken phase
     }
 
      return newState;
@@ -1452,7 +1747,8 @@ async function handleAIExchange(gameState: GameState): Promise<GameState> {
 // --- Public API ---
 
 // Make this async because the actions it calls are async
-export async function performAction(gameState: GameState, playerId: string, action: ActionType, targetId?: string): Promise<GameState | null> { // Return GameState | null
+export async function performAction(gameState: GameState | null, playerId: string, action: ActionType, targetId?: string): Promise<GameState | null> { // Return GameState | null
+     if (!gameState) return createErrorState(`[API performAction] Error: gameState is null for player ${playerId}.`);
     console.log(`[API performAction] Request: Player ${playerId}, Action ${action}, Target ${targetId || 'None'}`);
     let newState = { ...gameState };
     const stateBeforeAction = { ...gameState }; // For fallback on error
@@ -1460,25 +1756,30 @@ export async function performAction(gameState: GameState, playerId: string, acti
 
     // --- Input Validations ---
     if (!player) {
-        console.error("[API performAction] Error: Player not found.");
-        return logAction(newState, "Error: Player not found."); // Still returns GameState
+        const errorMsg = "[API performAction] Error: Player not found.";
+        console.error(errorMsg);
+        return logAction(newState, errorMsg); // Still returns GameState
     }
-    if (player.id !== newState.players[newState.currentPlayerIndex].id) {
-         console.warn(`[API performAction] Warning: Not player ${playerId}'s turn (Current: ${newState.players[newState.currentPlayerIndex].id} - ${newState.players[newState.currentPlayerIndex].name}).`);
+    if (player.id !== newState.players[newState.currentPlayerIndex]?.id) { // Added safety check for currentPlayerIndex
+         const warnMsg = `[API performAction] Warning: Not player ${playerId}'s turn (Current: ${newState.players[newState.currentPlayerIndex]?.id || 'Invalid Index'} - ${newState.players[newState.currentPlayerIndex]?.name || 'Unknown'}).`;
+         console.warn(warnMsg);
         return logAction(newState, "Warning: Not your turn."); // Prevent action but don't crash
     }
      if (newState.winner) {
-         console.warn("[API performAction] Warning: Action attempted after game ended.");
+          const warnMsg = "[API performAction] Warning: Action attempted after game ended.";
+         console.warn(warnMsg);
         return logAction(newState, "Game already over.");
      }
      if (newState.challengeOrBlockPhase || newState.pendingExchange) {
-         console.warn("[API performAction] Warning: Action attempted during challenge/block/exchange phase.");
+          const warnMsg = "[API performAction] Warning: Action attempted during challenge/block/exchange phase.";
+         console.warn(warnMsg);
         return logAction(newState, "Cannot perform action now, waiting for response or exchange.");
     }
      if (!player.influence.some(c => !c.revealed)) {
-         console.warn(`[API performAction] Warning: Player ${playerId} is eliminated.`);
+          const warnMsg = `[API performAction] Warning: Player ${playerId} is eliminated.`;
+         console.warn(warnMsg);
           // If eliminated player is somehow current player, advance turn to prevent deadlock
-          if (player.id === newState.players[newState.currentPlayerIndex].id) {
+          if (player.id === newState.players[newState.currentPlayerIndex]?.id) { // Added safety check
               console.warn(`[API performAction] Eliminated player ${playerId} is current player. Advancing turn.`);
               return await advanceTurn(newState);
           }
@@ -1489,18 +1790,21 @@ export async function performAction(gameState: GameState, playerId: string, acti
 
     // --- Action Specific Validations ---
     if (action === 'Coup' && player.money < 7) {
-        console.warn(`[API performAction] Warning: ${playerId} insufficient funds for Coup.`);
+        const warnMsg = `[API performAction] Warning: ${playerId} insufficient funds for Coup.`;
+        console.warn(warnMsg);
         return logAction(newState, "Not enough money for Coup (need 7).");
     }
     if (action === 'Assassinate' && player.money < 3) {
-         console.warn(`[API performAction] Warning: ${playerId} insufficient funds for Assassinate.`);
+          const warnMsg = `[API performAction] Warning: ${playerId} insufficient funds for Assassinate.`;
+         console.warn(warnMsg);
         return logAction(newState, "Not enough money to Assassinate (need 3).");
     }
     // Check if must Coup (and can Coup)
     if (player.money >= 10 && action !== 'Coup') {
          const canCoup = getAvailableActions(player, newState).includes('Coup');
         if (canCoup) {
-             console.warn(`[API performAction] Warning: ${playerId} has >= 10 coins, must Coup.`);
+              const warnMsg = `[API performAction] Warning: ${playerId} has >= 10 coins, must Coup.`;
+             console.warn(warnMsg);
              return logAction(newState, "Must perform Coup with 10 or more coins.");
         } else {
             // Cannot Coup (no targets), allow other actions. Log this edge case.
@@ -1509,19 +1813,23 @@ export async function performAction(gameState: GameState, playerId: string, acti
     }
      const requiresTarget = (action === 'Coup' || action === 'Assassinate' || action === 'Steal');
      if (requiresTarget && !targetId) {
-          console.warn(`[API performAction] Warning: Action ${action} requires a target.`);
+           const warnMsg = `[API performAction] Warning: Action ${action} requires a target.`;
+          console.warn(warnMsg);
          return logAction(newState, `Action ${action} requires a target.`);
      }
      if (requiresTarget && !target) {
-          console.warn(`[API performAction] Warning: Target player ${targetId} not found.`);
+           const warnMsg = `[API performAction] Warning: Target player ${targetId} not found.`;
+          console.warn(warnMsg);
          return logAction(newState, `Target player not found.`);
      }
       if (target && !getActivePlayers(newState).some(p => p.id === target.id)) {
-          console.warn(`[API performAction] Warning: Target ${target.name} is already eliminated.`);
+          const warnMsg = `[API performAction] Warning: Target ${target.name} is already eliminated.`;
+         console.warn(warnMsg);
          return logAction(newState, `Target ${target.name} is already eliminated.`);
      }
      if (target && target.id === player.id) {
-          console.warn(`[API performAction] Warning: Player ${playerId} cannot target self with ${action}.`);
+           const warnMsg = `[API performAction] Warning: Player ${playerId} cannot target self with ${action}.`;
+          console.warn(warnMsg);
          return logAction(newState, `Cannot target self with ${action}.`);
      }
 
@@ -1556,17 +1864,19 @@ export async function performAction(gameState: GameState, playerId: string, acti
                 stateAfterActionExecution = await performExchange(newState, playerId);
                 break;
             default:
-                console.error(`[API performAction] Error: Unknown action type: ${action}`);
-                newState = logAction(newState, `Error: Unknown action: ${action}`);
+                const errorMsg = `[API performAction] Error: Unknown action type: ${action}`;
+                console.error(errorMsg);
+                newState = logAction(newState, errorMsg);
                 // Clear invalid action state
                 newState.currentAction = null;
                 stateAfterActionExecution = newState; // Return the logged error state
                 break;
         }
     } catch (error: any) {
-         console.error(`[API performAction] Critical error during ${action} execution: ${error.message}`);
+          const errorMsgLog = `[API performAction] Critical error during ${action} execution: ${error.message}. Reverting action.`;
+         console.error(errorMsgLog);
          // Attempt to revert to state before action, log error
-         stateAfterActionExecution = logAction(stateBeforeAction, `Critical error performing ${action}: ${error.message}. Reverting action.`);
+         stateAfterActionExecution = logAction(stateBeforeAction, errorMsgLog);
          // Clear potentially inconsistent partial state changes
          if (stateAfterActionExecution) { // Check if stateAfterActionExecution is not null
             stateAfterActionExecution.currentAction = null;
@@ -1574,8 +1884,9 @@ export async function performAction(gameState: GameState, playerId: string, acti
             stateAfterActionExecution.pendingExchange = null;
          } else {
              // If even the fallback logging failed, return the original state to avoid null
-             console.error("[API performAction] Fallback logging failed, returning original state before action.");
-             stateAfterActionExecution = stateBeforeAction;
+              const fallbackErrorMsg = "[API performAction] Fallback logging failed, returning original state before action.";
+             console.error(fallbackErrorMsg);
+             stateAfterActionExecution = logAction(stateBeforeAction, fallbackErrorMsg); // Try logging again on fallback state
          }
 
     }
@@ -1588,8 +1899,10 @@ export async function performAction(gameState: GameState, playerId: string, acti
      return stateAfterActionExecution; // Can return null if execution failed catastrophically before setting stateAfterActionExecution
 }
 
+
 // Make this async because the functions it calls (resolveChallenge/Block/etc.) are async
-export async function handlePlayerResponse(gameState: GameState, respondingPlayerId: string, response: GameResponseType): Promise<GameState | null> { // Return GameState | null
+export async function handlePlayerResponse(gameState: GameState | null, respondingPlayerId: string, response: GameResponseType): Promise<GameState | null> { // Return GameState | null
+     if (!gameState) return createErrorState(`[API handlePlayerResponse] Error: gameState is null for player ${respondingPlayerId}.`);
     console.log(`[API handlePlayerResponse] Request: Player ${respondingPlayerId}, Response ${response}`);
     let newState = { ...gameState };
     const stateBeforeResponse = { ...gameState }; // For fallback
@@ -1597,43 +1910,50 @@ export async function handlePlayerResponse(gameState: GameState, respondingPlaye
 
      // --- Input Validations ---
      if (!phase) {
-          console.warn("[API handlePlayerResponse] Warning: No challenge/block phase active.");
+           const warnMsg = "[API handlePlayerResponse] Warning: No challenge/block phase active.";
+          console.warn(warnMsg);
          return logAction(newState, "Invalid response: Not in challenge/block phase.");
      }
       const responderCanAct = phase.possibleResponses.some(p => p.id === respondingPlayerId);
       const responderHasActed = phase.responses.some(r => r.playerId === respondingPlayerId);
 
      if (!responderCanAct) {
-          console.warn(`[API handlePlayerResponse] Warning: Player ${respondingPlayerId} cannot respond in this phase. Possible: [${phase.possibleResponses.map(p=>p.id).join(',')}]`);
+           const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} cannot respond in this phase. Possible: [${phase.possibleResponses.map(p=>p.id).join(',')}]`;
+          console.warn(warnMsg);
          return logAction(newState, `Invalid response: Player ${getPlayerById(newState, respondingPlayerId)?.name} cannot respond now.`);
      }
     if (responderHasActed) {
-         console.warn(`[API handlePlayerResponse] Warning: Player ${respondingPlayerId} already responded.`);
+          const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} already responded.`;
+         console.warn(warnMsg);
         return logAction(newState, `${getPlayerById(newState, respondingPlayerId)?.name} has already responded.`);
     }
      // Check if response type is valid for the action/block being claimed
      const claim = phase.action; // The action or block being claimed
      if (response === 'Challenge') {
          if (!getCardForAction(claim)) { // Check if claim is challengeable (has associated card)
-             console.warn(`[API handlePlayerResponse] Invalid response: Cannot challenge the claim '${claim}'.`);
+              const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot challenge the claim '${claim}'.`;
+              console.warn(warnMsg);
              return logAction(newState, `Cannot challenge the claim '${claim}'.`);
          }
      } else if (response.startsWith('Block')) {
          // Can only block if the claim was an *action* (not a block itself)
          if (claim.startsWith('Block ')) {
-              console.warn(`[API handlePlayerResponse] Invalid response: Cannot block a block claim ('${claim}').`);
+               const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot block a block claim ('${claim}').`;
+               console.warn(warnMsg);
               return logAction(newState, `Cannot block a block claim.`);
          }
          // Check if the block type is valid for the original action
          const blockType = getBlockTypeForAction(claim as ActionType);
          if (response !== blockType) {
-             console.warn(`[API handlePlayerResponse] Invalid response: Cannot use ${response} to block ${claim}. Expected ${blockType || 'no block'}.`);
+              const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot use ${response} to block ${claim}. Expected ${blockType || 'no block'}.`;
+              console.warn(warnMsg);
               return logAction(newState, `Cannot use ${response} to block ${claim}.`);
          }
          // Ensure blocker is target (if applicable) or it's Foreign Aid
          if (claim === 'Steal' || claim === 'Assassinate') {
              if (phase.targetPlayer?.id !== respondingPlayerId) {
-                 console.warn(`[API handlePlayerResponse] Invalid response: Only target ${phase.targetPlayer?.name} can block ${claim}.`);
+                  const warnMsg = `[API handlePlayerResponse] Invalid response: Only target ${phase.targetPlayer?.name} can block ${claim}.`;
+                  console.warn(warnMsg);
                  return logAction(newState, `Only the target can ${response}.`);
              }
          }
@@ -1641,7 +1961,12 @@ export async function handlePlayerResponse(gameState: GameState, respondingPlaye
      }
 
 
-    const respondingPlayer = getPlayerById(newState, respondingPlayerId)!;
+    const respondingPlayer = getPlayerById(newState, respondingPlayerId);
+     if (!respondingPlayer) { // Safety check
+         const errorMsg = `[API handlePlayerResponse] Error: Responding player ${respondingPlayerId} not found.`;
+         console.error(errorMsg);
+         return logAction(newState, errorMsg);
+     }
 
     // --- Update Phase State ---
      console.log(`[API handlePlayerResponse] Processing response ${response} from ${respondingPlayer.name}`);
@@ -1691,25 +2016,38 @@ export async function handlePlayerResponse(gameState: GameState, respondingPlaye
             }
         }
     } catch (error: any) {
-         console.error(`[API handlePlayerResponse] Critical error during response handling for ${response}: ${error.message}`);
-         stateAfterResponseHandling = logAction(stateBeforeResponse, `Critical error handling response ${response}: ${error.message}. Reverting.`);
+          const errorMsgLog = `[API handlePlayerResponse] Critical error during response handling for ${response}: ${error.message}. Reverting.`;
+         console.error(errorMsgLog);
+         stateAfterResponseHandling = logAction(stateBeforeResponse, errorMsgLog);
          // Clear potentially inconsistent state
          if (stateAfterResponseHandling) {
             stateAfterResponseHandling.challengeOrBlockPhase = null;
          } else {
-            console.error("[API handlePlayerResponse] Fallback logging failed, returning original state before response.");
-            stateAfterResponseHandling = stateBeforeResponse;
+              const fallbackErrorMsg = "[API handlePlayerResponse] Fallback logging failed, returning original state before response.";
+             console.error(fallbackErrorMsg);
+             stateAfterResponseHandling = logAction(stateBeforeResponse, fallbackErrorMsg); // Try logging again on fallback state
          }
     }
 
+    // Final Null Check
+    if (!stateAfterResponseHandling) {
+        const finalErrorMsg = `[API handlePlayerResponse] stateAfterResponseHandling is null after processing ${response}. Reverting.`;
+        console.error(finalErrorMsg);
+        stateAfterResponseHandling = logAction(stateBeforeResponse, finalErrorMsg);
+        if (stateAfterResponseHandling) stateAfterResponseHandling.challengeOrBlockPhase = null;
+        else stateAfterResponseHandling = stateBeforeResponse; // Absolute fallback
+    }
+
+
      console.log(`[API handlePlayerResponse] Finished processing response ${response}. Returning state.`);
-     // Ensure we always return a valid GameState
      return stateAfterResponseHandling;
 }
 
 
+
 // Make this async because it calls completeExchange which is async
-export async function handleExchangeSelection(gameState: GameState, playerId: string, cardsToKeep: CardType[]): Promise<GameState | null> { // Return GameState | null
+export async function handleExchangeSelection(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState | null> { // Return GameState | null
+      if (!gameState) return createErrorState(`[API handleExchangeSelection] Error: gameState is null for player ${playerId}.`);
      console.log(`[API handleExchangeSelection] Request: Player ${playerId}, Cards ${cardsToKeep.join(', ')}`);
     let newState = { ...gameState };
     const stateBeforeExchange = { ...gameState }; // Fallback
@@ -1718,23 +2056,27 @@ export async function handleExchangeSelection(gameState: GameState, playerId: st
 
     // --- Input Validations ---
     if (!player) {
-        console.error("[API handleExchangeSelection] Error: Player not found.");
-        return logAction(newState, "Error: Player not found.");
+        const errorMsg = "[API handleExchangeSelection] Error: Player not found.";
+        console.error(errorMsg);
+        return logAction(newState, errorMsg);
     }
     // Exchange happens *during* a player's turn, triggered by Exchange action success.
     // We don't strictly need to check currentPlayerIndex === playerIndex here,
     // but we MUST check if the pendingExchange player matches.
     if (!exchangeInfo || exchangeInfo.player.id !== playerId) {
-         console.warn("[API handleExchangeSelection] Warning: Not in exchange phase for this player.");
+           const warnMsg = "[API handleExchangeSelection] Warning: Not in exchange phase for this player.";
+          console.warn(warnMsg);
         return logAction(newState, "Not in exchange phase for this player.");
     }
      if (!player.influence.some(c => !c.revealed)) {
-          console.warn(`[API handleExchangeSelection] Warning: Player ${playerId} is eliminated.`);
+           const warnMsg = `[API handleExchangeSelection] Warning: Player ${playerId} is eliminated.`;
+          console.warn(warnMsg);
          return logAction(newState, "You are eliminated."); // Should not happen if logic is correct
      }
       const requiredCount = player.influence.filter(c => !c.revealed).length;
      if (cardsToKeep.length !== requiredCount) {
-         console.warn(`[API handleExchangeSelection] Error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${requiredCount}.`);
+           const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${requiredCount}.`;
+          console.warn(warnMsg);
          return logAction(newState, `Error: Must select exactly ${requiredCount} card(s) to keep.`);
      }
       // Verify selected cards are from the available choices
@@ -1745,7 +2087,8 @@ export async function handleExchangeSelection(gameState: GameState, playerId: st
            const indexInChoices = tempCardsToChoose.indexOf(card);
            if(indexInChoices === -1) {
                validSelection = false;
-               console.warn(`[API handleExchangeSelection] Error: Player ${playerId} selected invalid card: ${card}. Choices were: ${exchangeInfo.cardsToChoose.join(',')}`);
+               const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected invalid card: ${card}. Choices were: ${exchangeInfo.cardsToChoose.join(',')}`;
+               console.warn(warnMsg);
                return logAction(newState, `Error: Invalid card selected: ${card}.`);
            }
            tempCardsToChoose.splice(indexInChoices, 1); // Remove the card from choices to handle duplicates correctly
@@ -1757,29 +2100,34 @@ export async function handleExchangeSelection(gameState: GameState, playerId: st
      try {
         stateAfterExchange = await completeExchange(newState, playerId, cardsToKeep);
      } catch(error: any) {
-        console.error(`[API handleExchangeSelection] Critical error during completeExchange: ${error.message}`);
-        stateAfterExchange = logAction(stateBeforeExchange, `Critical error completing exchange: ${error.message}. Reverting.`);
+         const errorMsgLog = `[API handleExchangeSelection] Critical error during completeExchange: ${error.message}. Reverting.`;
+        console.error(errorMsgLog);
+        stateAfterExchange = logAction(stateBeforeExchange, errorMsgLog);
         if (stateAfterExchange) {
             stateAfterExchange.pendingExchange = null; // Clean up phase
         } else {
-            console.error("[API handleExchangeSelection] Fallback logging failed, returning original state before exchange.");
-            stateAfterExchange = stateBeforeExchange;
+             const fallbackErrorMsg = "[API handleExchangeSelection] Fallback logging failed, returning original state before exchange.";
+             console.error(fallbackErrorMsg);
+             stateAfterExchange = logAction(stateBeforeExchange, fallbackErrorMsg); // Try logging again on fallback state
         }
      }
      return stateAfterExchange; // Can return null if completion fails critically
 }
 
+
 // This function should ONLY be called by the game logic internally when a reveal is mandated.
 // It's not a player action. The UI might call it *in response* to a game state flag indicating a reveal is needed.
 // Make async as it calls revealInfluence
-export async function forceRevealInfluence(gameState: GameState, playerId: string, cardToReveal?: CardType): Promise<GameState> {
+export async function forceRevealInfluence(gameState: GameState | null, playerId: string, cardToReveal?: CardType): Promise<GameState> {
+     if (!gameState) return createErrorState(`[API forceRevealInfluence] Error: gameState is null for player ${playerId}.`);
      console.log(`[API forceRevealInfluence] Request: Player ${playerId}, Card ${cardToReveal || 'auto'}`);
      let newState = { ...gameState };
      const stateBeforeReveal = { ...gameState }; // Fallback
      const player = getPlayerById(newState, playerId);
      if (!player) {
-          console.error("[API forceRevealInfluence] Error: Player not found.");
-          return newState;
+           const errorMsg = "[API forceRevealInfluence] Error: Player not found.";
+          console.error(errorMsg);
+          return logAction(newState, errorMsg);
      }
 
      console.log(`[API forceRevealInfluence] Processing forced reveal for ${player.name}.`);
@@ -1791,16 +2139,18 @@ export async function forceRevealInfluence(gameState: GameState, playerId: strin
          revealedState = result.newState;
          revealedCard = result.revealedCard;
      } catch (error: any) {
-         console.error(`[API forceRevealInfluence] Critical error during revealInfluence: ${error.message}`);
-         revealedState = logAction(stateBeforeReveal, `Critical error forcing reveal: ${error.message}. Reverting.`);
+         const errorMsgLog = `[API forceRevealInfluence] Critical error during revealInfluence: ${error.message}. Reverting.`;
+         console.error(errorMsgLog);
+         revealedState = logAction(stateBeforeReveal, errorMsgLog);
          // Attempt to clear potentially inconsistent state? Maybe not safe here.
      }
       newState = revealedState || stateBeforeReveal; // Use revealed state or fallback
 
 
      if(revealedCard === null && player.influence.some(c => !c.revealed)) { // Check if player *should* have cards left
-         console.error(`[API forceRevealInfluence] ${player.name} had influence left but revealInfluence returned null.`);
-         newState = logAction(newState, `Error: ${player.name} failed to reveal influence.`);
+          const errorMsg = `[API forceRevealInfluence] ${player.name} had influence left but revealInfluence returned null.`;
+         console.error(errorMsg);
+         newState = logAction(newState, errorMsg);
      } else if (revealedCard === null && !player.influence.some(c => !c.revealed)) {
           console.log(`[API forceRevealInfluence] ${player.name} had no influence left to reveal.`);
           // Log might already happen in revealInfluence
