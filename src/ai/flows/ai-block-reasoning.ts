@@ -44,7 +44,9 @@ export type AIBlockReasoningOutput = z.infer<typeof AIBlockReasoningOutputSchema
 // Load the prompt from the external file
 const blockReasoningPrompt = ai.definePrompt({
     name: 'aiBlockReasoningPrompt', // Matches name in prompt file
-    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'aiBlockReasoningPrompt.prompt'), // Correct path including rulebook context
+    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'aiBlockReasoningPrompt.prompt'), // Reference the main prompt file
+    // Register the rulebook as a partial prompt
+    partials: { coupRulebook: { promptPath: join(process.cwd(), 'src', 'ai', 'rules', 'coup-rulebook-pt-br.txt') } },
     input: { schema: AIBlockReasoningInputSchema },
     output: { schema: AIBlockReasoningOutputSchema },
      model: 'googleai/gemini-1.5-flash',
@@ -65,30 +67,33 @@ const aiBlockReasoningFlow = ai.defineFlow<
     outputSchema: AIBlockReasoningOutputSchema,
   },
   async (input) => {
-     // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
-     const llmResponse = await blockReasoningPrompt.generate({ input });
-     // Access output directly in 1.x
-     const output = llmResponse.output;
-
-    if (!output) {
-         console.error("AI Block Reasoning Error: No output generated.");
-         return {
-             shouldBlock: false, // Default to not blocking on error
-             reasoning: 'AI failed to generate a valid block reasoning response, defaulting to not blocking.',
-         };
-    }
-
-     // Validate output
+     let output: AIBlockReasoningOutput | null = null;
      try {
-          const validatedOutput = AIBlockReasoningOutputSchema.parse(output);
+         // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
+         const llmResponse = await blockReasoningPrompt.generate({ input });
+         // Access output directly in 1.x
+         output = llmResponse.output;
+
+        if (!output) {
+             console.error("AI Block Reasoning Error: LLM response did not contain output.");
+            throw new Error("LLM response did not contain output.");
+        }
+
+         // Validate output
+         const validatedOutput = AIBlockReasoningOutputSchema.parse(output);
+          console.log("AI Block Reasoning Flow: Successfully generated and validated output:", validatedOutput);
           return validatedOutput;
-     } catch (e) {
-         console.error("AI Block Reasoning Output validation failed:", e);
-         console.error("Invalid AI output:", output);
+
+     } catch (e: any) {
+         console.error("AI Block Reasoning Error:", e);
+         console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
+        if (output) { // Log the raw output if available, even if invalid
+             console.error("Raw AI Output (Validation Failed):", JSON.stringify(output, null, 2));
+        }
          // Fallback logic: Default to not blocking
          return {
              shouldBlock: false,
-             reasoning: 'AI response validation failed, defaulting to not blocking.',
+             reasoning: `AI generation or validation failed: ${e.message || 'Unknown error'}. Defaulting to not blocking.`,
          };
      }
   }
@@ -107,12 +112,12 @@ export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AI
        const result = await aiBlockReasoningFlow(mappedInput);
        console.log("AI Block decision:", result);
        return result;
-   } catch (error) {
-        console.error("Error in aiBlockReasoningFlow:", error);
-        // Fallback in case the flow itself throws an error
+   } catch (error: any) {
+        console.error("Error executing aiBlockReasoningFlow:", error);
+        // Fallback in case the flow itself throws an unexpected error
         return {
             shouldBlock: false,
-            reasoning: 'An unexpected error occurred during AI block reasoning, defaulting to not blocking.',
+            reasoning: `An unexpected error occurred during AI block reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not blocking.`,
         };
    }
 }

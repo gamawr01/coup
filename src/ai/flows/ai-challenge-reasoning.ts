@@ -34,7 +34,9 @@ export type AiChallengeReasoningOutput = z.infer<typeof AiChallengeReasoningOutp
 // Load the prompt from the external file
 const challengeReasoningPrompt = ai.definePrompt({
     name: 'aiChallengeReasoningPrompt', // Matches name in prompt file
-    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'aiChallengeReasoningPrompt.prompt'), // Correct path including rulebook context
+    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'aiChallengeReasoningPrompt.prompt'), // Reference the main prompt file
+    // Register the rulebook as a partial prompt
+    partials: { coupRulebook: { promptPath: join(process.cwd(), 'src', 'ai', 'rules', 'coup-rulebook-pt-br.txt') } },
     input: { schema: AiChallengeReasoningInputSchema },
     output: { schema: AiChallengeReasoningOutputSchema },
      model: 'googleai/gemini-1.5-flash',
@@ -55,32 +57,35 @@ const aiChallengeReasoningFlow = ai.defineFlow<
     outputSchema: AiChallengeReasoningOutputSchema,
   },
   async (input) => {
-     // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
-    const llmResponse = await challengeReasoningPrompt.generate({ input });
-     // Access output directly in 1.x
-    const output = llmResponse.output;
+    let output: AiChallengeReasoningOutput | null = null;
+     try {
+         // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
+        const llmResponse = await challengeReasoningPrompt.generate({ input });
+         // Access output directly in 1.x
+        output = llmResponse.output;
 
-    if (!output) {
-        console.error("AI Challenge Reasoning Error: No output generated.");
-        return {
-             shouldChallenge: false, // Default to not challenging on error
-             reason: 'AI failed to generate a valid challenge reasoning response, defaulting to not challenging.',
-         };
-    }
+        if (!output) {
+             console.error("AI Challenge Reasoning Error: LLM response did not contain output.");
+            throw new Error("LLM response did not contain output.");
+        }
 
-    // Validate output
-    try {
-         const validatedOutput = AiChallengeReasoningOutputSchema.parse(output);
-         return validatedOutput;
-    } catch (e) {
-        console.error("AI Challenge Reasoning Output validation failed:", e);
-         console.error("Invalid AI output:", output);
+        // Validate output
+        const validatedOutput = AiChallengeReasoningOutputSchema.parse(output);
+        console.log("AI Challenge Reasoning Flow: Successfully generated and validated output:", validatedOutput);
+        return validatedOutput;
+
+     } catch (e: any) {
+        console.error("AI Challenge Reasoning Error:", e);
+        console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
+        if (output) { // Log the raw output if available, even if invalid
+             console.error("Raw AI Output (Validation Failed):", JSON.stringify(output, null, 2));
+        }
          // Fallback logic: Default to not challenging
          return {
              shouldChallenge: false,
-             reason: 'AI response validation failed, defaulting to not challenging.',
+             reason: `AI generation or validation failed: ${e.message || 'Unknown error'}. Defaulting to not challenging.`,
          };
-    }
+     }
   }
 );
 
@@ -90,12 +95,12 @@ export async function aiChallengeReasoning(input: AiChallengeReasoningInput): Pr
         const result = await aiChallengeReasoningFlow(input);
         console.log("AI Challenge decision:", result);
         return result;
-    } catch (error) {
-        console.error("Error in aiChallengeReasoningFlow:", error);
-        // Fallback in case the flow itself throws an error
+    } catch (error: any) {
+        console.error("Error executing aiChallengeReasoningFlow:", error);
+        // Fallback in case the flow itself throws an unexpected error
         return {
             shouldChallenge: false,
-            reason: 'An unexpected error occurred during AI challenge reasoning, defaulting to not challenging.',
+            reason: `An unexpected error occurred during AI challenge reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not challenging.`,
         };
     }
 }
