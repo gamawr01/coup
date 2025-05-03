@@ -138,9 +138,11 @@ function getNextPlayerIndex(currentIndex: number, players: Player[]): number {
     return nextIndex;
 }
 
+
 // Helper function to safely create a GameState object with an error message
 function createErrorState(errorMessage: string, previousState?: GameState | null): GameState {
-    const baseState: GameState = previousState ? { ...previousState } : {
+    // Define a minimal default structure
+    const defaultState: GameState = {
         players: [],
         deck: [],
         treasury: 0,
@@ -152,26 +154,27 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
         winner: null,
         needsHumanTriggerForAI: false,
     };
+
+    // Use previous state if valid, otherwise use the default
+    const baseState: GameState = previousState ? { ...previousState } : defaultState;
+
+    // Ensure actionLog exists before spreading and add the new message
     baseState.actionLog = [...(baseState.actionLog || []), errorMessage];
     return baseState;
 }
 
 
 function logAction(gameState: GameState | null, message: string): GameState {
-    if (!gameState) {
-      const errorMsg = `[logAction] Error: Attempted to log action on null gameState: "${message}"`;
-      console.error(errorMsg);
-      // In a real scenario, you might want to throw an error or return a default error state
-      // For now, let's create a minimal error state to avoid crashing.
-       return createErrorState(errorMsg);
-    }
+    // If gameState is null, create a base error state first
+    const validGameState = gameState ?? createErrorState(`[logAction] Received null gameState while trying to log: "${message}"`);
 
     console.log("[Game Log]", message); // Add console logging for server/debug
-    // Keep log concise for AI prompt, maybe limit size?
     const MAX_LOG_ENTRIES = 50;
-    const newLog = [...gameState.actionLog, message].slice(-MAX_LOG_ENTRIES);
+    // Ensure actionLog exists before spreading
+    const currentLog = validGameState.actionLog || [];
+    const newLog = [...currentLog, message].slice(-MAX_LOG_ENTRIES);
     return {
-        ...gameState,
+        ...validGameState,
         actionLog: newLog
     };
 }

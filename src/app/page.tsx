@@ -54,7 +54,7 @@ export default function Home() {
        // Add explicit null check here
        if (!newState) {
          console.error("[updateGameState] Error: Received invalid (null or undefined) state from update function/promise.");
-         toast({ title: "Error", description: "Failed to update game state.", variant: "destructive" });
+         toast({ title: "Error", description: "Failed to update game state. State might be out of sync.", variant: "destructive" });
          setIsProcessing(false); // Reset processing flag on error
          return; // Prevent further processing with invalid state
        }
@@ -169,7 +169,7 @@ export default function Home() {
             }
             return nextState;
        });
-  }, [gameState, humanPlayerId, updateGameState, isProcessing]);
+  }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
 
    const handlePlayerExchange = useCallback((cardsToKeep: CardType[]) => {
       if (!gameState || isProcessing || gameState.winner) {
@@ -193,7 +193,7 @@ export default function Home() {
              }
              return nextState;
       });
-  }, [gameState, humanPlayerId, updateGameState, isProcessing]);
+  }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
 
    // Placeholder for Forced Reveal - needs proper trigger logic from game-logic.ts
    const handleForceReveal = useCallback((cardToReveal?: CardType) => {
@@ -240,7 +240,7 @@ export default function Home() {
              }
              return nextState;
         });
-    }, [gameState, updateGameState, isProcessing]);
+    }, [gameState, updateGameState, isProcessing, toast]);
 
 
   if (!gameStarted) {
