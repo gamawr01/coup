@@ -2,7 +2,7 @@
 'use server';
 
 /**
- * @fileOverview Provides reasoning for the AI's decision to challenge an opponent's action.
+ * @fileOverview Provides reasoning for the AI's decision to challenge an opponent's action or block.
  *
  * - aiChallengeReasoning - Decides if the AI should challenge.
  * - AiChallengeReasoningInput - Input type.
@@ -12,22 +12,23 @@
 import { ai } from '@/ai/ai-instance';
 import { z } from 'genkit';
 import { join } from 'path';
+import type { GenerateResponse } from 'genkit'; // Import type for response
 
 // Define Zod schemas matching the prompt file structure
 const AiChallengeReasoningInputSchema = z.object({
-  action: z.string().describe('The action being performed by the opponent OR the block being performed.'),
-  currentPlayer: z.string().describe('The name of the player performing the action/block being potentially challenged.'),
-  targetPlayer: z.string().optional().describe('The name of the target player of the *original* action, if applicable.'), // Clarify this is original target
-  amount: z.number().optional().describe('The amount of coins involved in the action, if applicable.'),
-  aiInfluence: z.array(z.string()).describe('The AI player’s current *unrevealed* influence cards.'),
+  actionOrBlock: z.string().describe('The action (e.g., Tax, Steal) OR the block (e.g., Block Foreign Aid, Block Assassination) being performed by the opponent that you might challenge.'),
+  playerName: z.string().describe('The name of the player performing the action/block being potentially challenged.'),
+  targetPlayerName: z.string().optional().describe('The name of the target player of the *original* action, if the thing being challenged is a block.'), // Clarify this is original target
+  aiInfluenceCards: z.array(z.string()).describe("The AI player’s current *unrevealed* influence cards (e.g., ['Duke', 'Assassin'])."),
   opponentInfluenceCount: z.number().describe('The number of *unrevealed* influence cards the player performing the action/block has.'),
-  gameState: z.string().describe('A summary of the current game state including player money and known/revealed card information.'),
+   opponentMoney: z.number().describe('The amount of money the opponent performing the action/block has.'), // Added for context
+  gameState: z.string().describe('A summary of the current game state including all players money and revealed cards, and recent action log summary.'), // Clarify content
 });
 export type AiChallengeReasoningInput = z.infer<typeof AiChallengeReasoningInputSchema>;
 
 const AiChallengeReasoningOutputSchema = z.object({
-  shouldChallenge: z.boolean().describe('Whether the AI should challenge the action/block.'),
-  reason: z.string().describe('The AI’s reasoning for challenging or not challenging.'),
+  shouldChallenge: z.boolean().describe('Whether the AI should challenge the action/block. Must be true or false.'),
+  reasoning: z.string().describe('The AI’s reasoning for challenging or not challenging.'),
 });
 export type AiChallengeReasoningOutput = z.infer<typeof AiChallengeReasoningOutputSchema>;
 
@@ -57,16 +58,20 @@ const aiChallengeReasoningFlow = ai.defineFlow<
     outputSchema: AiChallengeReasoningOutputSchema,
   },
   async (input) => {
+    let llmResponse: GenerateResponse<z.infer<typeof AiChallengeReasoningOutputSchema>>;
     let output: AiChallengeReasoningOutput | null = null;
      try {
          // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
-        const llmResponse = await challengeReasoningPrompt.generate({ input });
+        llmResponse = await challengeReasoningPrompt.generate({ input });
          // Access output directly in 1.x
         output = llmResponse.output;
 
         if (!output) {
-             console.error("AI Challenge Reasoning Error: LLM response did not contain output.");
-            throw new Error("LLM response did not contain output.");
+             console.error("AI Challenge Reasoning Error: LLM response did not contain structured output.");
+             console.error("LLM Raw Text Response:", llmResponse.text);
+             console.error("LLM Finish Reason:", llmResponse.finishReason);
+             console.error("LLM Usage Data:", llmResponse.usage);
+            throw new Error("LLM response did not contain structured output.");
         }
 
         // Validate output
@@ -75,15 +80,19 @@ const aiChallengeReasoningFlow = ai.defineFlow<
         return validatedOutput;
 
      } catch (e: any) {
-        console.error("AI Challenge Reasoning Error:", e);
+        console.error("AI Challenge Reasoning Error:", e); // Log the full error object
         console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
         if (output) { // Log the raw output if available, even if invalid
-             console.error("Raw AI Output (Validation Failed):", JSON.stringify(output, null, 2));
+             console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
+        } else if (llmResponse!) { // Log raw text if structured output was null
+             console.error("LLM Raw Text Response (on error):", llmResponse.text);
+             console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
+             console.error("LLM Usage Data (on error):", llmResponse.usage);
         }
          // Fallback logic: Default to not challenging
          return {
-             shouldChallenge: false,
-             reason: `AI generation or validation failed: ${e.message || 'Unknown error'}. Defaulting to not challenging.`,
+             shouldChallenge: false, // Safer default
+             reasoning: `AI generation, parsing, or validation failed: ${e.message || 'Unknown error'}. Raw output might be logged above. Defaulting to not challenging.`,
          };
      }
   }
@@ -99,8 +108,8 @@ export async function aiChallengeReasoning(input: AiChallengeReasoningInput): Pr
         console.error("Error executing aiChallengeReasoningFlow:", error);
         // Fallback in case the flow itself throws an unexpected error
         return {
-            shouldChallenge: false,
-            reason: `An unexpected error occurred during AI challenge reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not challenging.`,
+            shouldChallenge: false, // Safer default
+            reasoning: `An unexpected error occurred during AI challenge reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not challenging.`,
         };
     }
 }

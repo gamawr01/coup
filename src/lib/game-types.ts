@@ -34,16 +34,16 @@ export interface GameState {
   deck: CardType[];
   treasury: number;
   currentPlayerIndex: number;
-  currentAction: {
+  currentAction: { // Represents the action just declared or underway
     player: Player;
     action: ActionType;
     target?: Player;
   } | null;
-  challengeOrBlockPhase: {
-    actionPlayer: Player;
-    action: ActionType;
-    targetPlayer?: Player;
-    possibleResponses: Player[]; // Players who can challenge or block
+  challengeOrBlockPhase: { // Represents the state when waiting for responses
+    actionPlayer: Player; // The player whose claim is being challenged/blocked
+    action: ActionType | BlockActionType; // The action OR block being claimed
+    targetPlayer?: Player; // The target of the *original* action (relevant for blocking/challenge-block)
+    possibleResponses: Player[]; // Players who can challenge or block this claim
     responses: {playerId: string, response: GameResponseType}[];
   } | null;
   pendingExchange: {

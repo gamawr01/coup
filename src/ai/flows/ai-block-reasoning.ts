@@ -12,10 +12,12 @@
 import { ai } from '@/ai/ai-instance';
 import { z } from 'genkit';
 import { join } from 'path';
+import type { GenerateResponse } from 'genkit'; // Import type for response
 
 // Define Zod schemas matching the prompt file structure
 const AIBlockReasoningInputSchema = z.object({
-  action: z.string().describe('The action being performed by the opponent that you might block.'),
+  action: z.string().describe('The action being performed by the opponent that you might block (e.g., Foreign Aid, Steal, Assassinate).'),
+  actionPlayerName: z.string().describe('The name of the player performing the action.'), // Added for context
    // Renamed for clarity to match prompt
   aiPlayerInfluenceCards: z
     .array(z.string())
@@ -28,15 +30,15 @@ const AIBlockReasoningInputSchema = z.object({
   opponentMoney: z.number().describe('The amount of money the opponent performing the action has.'),
   gameState: z
     .string()
-    .describe('The current state of the game, as a descriptive summary.'),
+    .describe('The current state of the game, as a descriptive summary including all players money and revealed cards.'), // Clarify content
 });
 export type AIBlockReasoningInput = z.infer<typeof AIBlockReasoningInputSchema>;
 
 const AIBlockReasoningOutputSchema = z.object({
   shouldBlock: z
     .boolean()
-    .describe('Whether the AI should block the action or not.'),
-  reasoning: z.string().describe('The AI reasoning behind the decision.'),
+    .describe('Whether the AI should block the action or not. Must be true or false.'),
+  reasoning: z.string().describe('The AI reasoning behind the decision to block or not block.'),
 });
 export type AIBlockReasoningOutput = z.infer<typeof AIBlockReasoningOutputSchema>;
 
@@ -67,16 +69,20 @@ const aiBlockReasoningFlow = ai.defineFlow<
     outputSchema: AIBlockReasoningOutputSchema,
   },
   async (input) => {
+     let llmResponse: GenerateResponse<z.infer<typeof AIBlockReasoningOutputSchema>>;
      let output: AIBlockReasoningOutput | null = null;
      try {
          // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
-         const llmResponse = await blockReasoningPrompt.generate({ input });
+         llmResponse = await blockReasoningPrompt.generate({ input });
          // Access output directly in 1.x
          output = llmResponse.output;
 
         if (!output) {
-             console.error("AI Block Reasoning Error: LLM response did not contain output.");
-            throw new Error("LLM response did not contain output.");
+             console.error("AI Block Reasoning Error: LLM response did not contain structured output.");
+             console.error("LLM Raw Text Response:", llmResponse.text);
+             console.error("LLM Finish Reason:", llmResponse.finishReason);
+             console.error("LLM Usage Data:", llmResponse.usage);
+            throw new Error("LLM response did not contain structured output.");
         }
 
          // Validate output
@@ -85,15 +91,19 @@ const aiBlockReasoningFlow = ai.defineFlow<
           return validatedOutput;
 
      } catch (e: any) {
-         console.error("AI Block Reasoning Error:", e);
+         console.error("AI Block Reasoning Error:", e); // Log the full error object
          console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
         if (output) { // Log the raw output if available, even if invalid
-             console.error("Raw AI Output (Validation Failed):", JSON.stringify(output, null, 2));
+             console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
+        } else if (llmResponse!) { // Log raw text if structured output was null
+             console.error("LLM Raw Text Response (on error):", llmResponse.text);
+             console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
+             console.error("LLM Usage Data (on error):", llmResponse.usage);
         }
          // Fallback logic: Default to not blocking
          return {
-             shouldBlock: false,
-             reasoning: `AI generation or validation failed: ${e.message || 'Unknown error'}. Defaulting to not blocking.`,
+             shouldBlock: false, // Safer default
+             reasoning: `AI generation, parsing, or validation failed: ${e.message || 'Unknown error'}. Raw output might be logged above. Defaulting to not blocking.`,
          };
      }
   }
@@ -116,7 +126,7 @@ export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AI
         console.error("Error executing aiBlockReasoningFlow:", error);
         // Fallback in case the flow itself throws an unexpected error
         return {
-            shouldBlock: false,
+            shouldBlock: false, // Safer default
             reasoning: `An unexpected error occurred during AI block reasoning flow execution: ${error.message || 'Unknown error'}. Defaulting to not blocking.`,
         };
    }

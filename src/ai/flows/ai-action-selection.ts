@@ -12,25 +12,29 @@
 import { ai } from '@/ai/ai-instance';
 import { z } from 'genkit';
 import { join } from 'path'; // Import join from path
+import type { GenerateResponse } from 'genkit'; // Import type for response
 
 // Define Zod schemas matching the prompt file structure
 const AIActionSelectionInputSchema = z.object({
   playerMoney: z.number().describe('The amount of money the AI player has.'),
-  playerInfluence: z.number().describe('The number of influence cards the AI player has.'),
-  opponentActions: z
-    .array(z.string())
-    .describe('The recent actions taken by opponents in the game.'),
+  playerInfluenceCards: z.array(z.string()).describe("The AI player's current *unrevealed* influence cards (e.g., ['Duke', 'Assassin'])."), // Added for better context
+  opponentInfo: z.array(z.object({ // Added for more context on opponents
+        name: z.string(),
+        money: z.number(),
+        influenceCount: z.number(),
+        revealedCards: z.array(z.string()),
+  })).describe('Information about the active opponents.'),
   availableActions: z
     .array(z.string())
     .describe('The actions the AI player can currently take (e.g., Income, Foreign Aid, Coup).'),
-  gameState: z.string().describe('A description of the current game state.'),
+  gameState: z.string().describe('A description of the current game state, including action log summary.'), // Clarify content
 });
 export type AIActionSelectionInput = z.infer<typeof AIActionSelectionInputSchema>;
 
 const AIActionSelectionOutputSchema = z.object({
-  action: z.string().describe('The action the AI player should take.'),
-  target: z.string().optional().describe('The target player\'s name, if applicable.'),
-  reasoning: z.string().describe('The AI reasoning for selecting this action.'),
+  action: z.string().describe('The action the AI player should take (must be one of the availableActions).'),
+  target: z.string().optional().describe("The name of the target opponent player, ONLY if the action requires it (e.g., Coup, Assassinate, Steal). Must be one of the opponent names from opponentInfo."),
+  reasoning: z.string().describe('The AI reasoning for selecting this action and target (if any).'),
 });
 export type AIActionSelectionOutput = z.infer<typeof AIActionSelectionOutputSchema>;
 
@@ -39,7 +43,7 @@ export type AIActionSelectionOutput = z.infer<typeof AIActionSelectionOutputSche
 const selectActionPrompt = ai.definePrompt({
     name: 'selectActionPrompt', // Matches the name in the prompt file
     promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'selectActionPrompt.prompt'), // Reference the main prompt file
-    // Register the rulebook as a partial prompt that can be included via {{> coup-rulebook-pt-br}}
+    // Register the rulebook as a partial prompt that can be included via {{> coupRulebook}}
     partials: { coupRulebook: {promptPath: join(process.cwd(), 'src', 'ai', 'rules', 'coup-rulebook-pt-br.txt')}},
     input: { schema: AIActionSelectionInputSchema },
     output: { schema: AIActionSelectionOutputSchema },
@@ -47,6 +51,8 @@ const selectActionPrompt = ai.definePrompt({
      response: {
         format: 'json', // Expect JSON output
     },
+    // Increase temperature slightly for more varied strategies?
+    // config: { temperature: 0.7 },
 });
 
 
@@ -61,16 +67,20 @@ const aiActionSelectionFlow = ai.defineFlow<
     outputSchema: AIActionSelectionOutputSchema,
   },
   async (input) => {
+    let llmResponse: GenerateResponse<z.infer<typeof AIActionSelectionOutputSchema>>;
     let output: AIActionSelectionOutput | null = null;
     try {
         // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
-        const llmResponse = await selectActionPrompt.generate({ input });
+        llmResponse = await selectActionPrompt.generate({ input });
         // Access output directly in 1.x
         output = llmResponse.output; // This might be null if generation fails structurally
 
         if (!output) {
-            console.error("AI Action Selection Error: LLM response did not contain output.");
-            throw new Error("LLM response did not contain output."); // Throw to be caught below
+            console.error("AI Action Selection Error: LLM response did not contain structured output.");
+            console.error("LLM Raw Text Response:", llmResponse.text);
+            console.error("LLM Finish Reason:", llmResponse.finishReason);
+            console.error("LLM Usage Data:", llmResponse.usage);
+            throw new Error("LLM response did not contain structured output."); // Throw to be caught below
         }
 
         // Validate output against schema - Genkit might do this implicitly with response format 'json'
@@ -81,15 +91,19 @@ const aiActionSelectionFlow = ai.defineFlow<
 
     } catch (e: any) {
         // Catch Zod validation errors and other potential errors during generation/parsing
-        console.error("AI Action Selection Error:", e);
+        console.error("AI Action Selection Error:", e); // Log the full error object
         console.error("Input Sent to AI:", JSON.stringify(input, null, 2)); // Log input on error
         if (output) { // Log the raw output if available, even if invalid
-             console.error("Raw AI Output (Validation Failed):", JSON.stringify(output, null, 2));
+             console.error("Raw AI Output (before parsing/validation):", JSON.stringify(output, null, 2));
+        } else if (llmResponse!) { // Log raw text if structured output was null
+             console.error("LLM Raw Text Response (on error):", llmResponse.text);
+             console.error("LLM Finish Reason (on error):", llmResponse.finishReason);
+             console.error("LLM Usage Data (on error):", llmResponse.usage);
         }
         // Provide a fallback even if generation technically succeeded but output is empty/null/invalid
         return {
-            action: 'Income',
-            reasoning: `AI generation or validation failed: ${e.message || 'Unknown error'}. Defaulting to Income.`,
+            action: 'Income', // Safest default action
+            reasoning: `AI generation, parsing, or validation failed: ${e.message || 'Unknown error'}. Raw output might be logged above. Defaulting to Income.`,
             target: undefined, // Ensure target is undefined for Income
         };
     }
@@ -107,7 +121,7 @@ export async function selectAction(input: AIActionSelectionInput): Promise<AIAct
        console.error("Error executing aiActionSelectionFlow:", error);
        // Fallback in case the flow itself throws an unexpected error
        return {
-           action: 'Income',
+           action: 'Income', // Safest default action
            reasoning: `An unexpected error occurred during AI action selection flow execution: ${error.message || 'Unknown error'}. Defaulting to Income.`,
            target: undefined,
        };

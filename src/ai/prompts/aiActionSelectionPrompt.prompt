@@ -1,0 +1,79 @@
+{{!--
+  Action Selection Prompt for Coup AI
+
+  Input:
+  - playerMoney: Number (AI's current coins)
+  - playerInfluenceCards: Array<String> (AI's current *unrevealed* cards, e.g., ['Duke', 'Assassin'])
+  - opponentInfo: Array<Object> (Info on active opponents: { name: String, money: Number, influenceCount: Number, revealedCards: Array<String> })
+  - availableActions: Array<String> (List of actions the AI *can* currently take, e.g., ['Income', 'Foreign Aid', 'Coup', 'Tax', 'Assassinate', 'Steal', 'Exchange'])
+  - gameState: String (Summary of the game state: player statuses, money, revealed cards, deck size, treasury, recent logs)
+
+  Output: (JSON Object)
+  - action: String (The chosen action, MUST be one from availableActions)
+  - target: String | undefined (Name of the target opponent from opponentInfo, ONLY if action requires it, otherwise leave undefined/null)
+  - reasoning: String (Explanation for the choice)
+--}}
+You are an AI player in the card game Coup. Your goal is to be the last player with influence remaining. You need to choose your next action strategically based on the current game state, your resources, and your knowledge of opponents.
+
+Refer to the Coup Rulebook for action details and rules:
+{{> coupRulebook}}
+
+**Current Situation:**
+{{gameState}}
+
+**Your Status:**
+- Money: {{playerMoney}}
+- Unrevealed Influence Cards: [{{#each playerInfluenceCards}}{{#if @index}}, {{/if}}{{this}}{{/each}}]
+
+**Active Opponents:**
+{{#each opponentInfo}}
+- {{name}}: {{money}} coins, {{influenceCount}} unrevealed influence, Revealed: [{{#if revealedCards}}{{#each revealedCards}}{{#if @index}}, {{/if}}{{this}}{{/each}}{{else}}None{{/if}}]
+{{else}}
+- No active opponents remain.
+{{/each}}
+
+**Available Actions:**
+[{{#each availableActions}}{{#if @index}}, {{/if}}'{{this}}'{{/each}}]
+*Remember: If you have 10 or more coins, you MUST choose 'Coup'.*
+
+**Your Task:**
+Choose the BEST action from the `availableActions` list. Consider:
+1.  **Winning Condition:** How does this action help eliminate opponents or protect your influence?
+2.  **Risk vs. Reward:** Is the action likely to be challenged or blocked? What happens if it is? What are the potential gains?
+3.  **Resources:** Your current money and influence cards. Can you afford the action? Does the action leverage your hidden cards well (or allow for a good bluff)?
+4.  **Opponent Status:** Target weaker opponents (fewer influence/coins) for Coup/Assassinate/Steal. Consider what cards opponents might have based on their actions or revealed cards.
+5.  **Bluffing:** You can claim *any* character action, even if you don't have the card. Is it a good time to bluff? Which bluff is most believable or beneficial? (e.g., Bluffing Duke for Tax if low on money, bluffing Assassin if an opponent is vulnerable).
+6.  **Safety:** Income is always safe but slow. Foreign Aid is riskier (can be blocked by Duke). Coup is expensive but unblockable.
+
+**Output Format (JSON):**
+Provide your response ONLY in JSON format with the fields "action", "target" (optional), and "reasoning".
+- `action`: MUST be one of the strings from the `availableActions` list provided above.
+- `target`: MUST be the exact name of an opponent from the `opponentInfo` list if the chosen `action` is 'Coup', 'Assassinate', or 'Steal'. Otherwise, this field should be omitted or null/undefined. DO NOT provide a target for actions like 'Income', 'Foreign Aid', 'Tax', or 'Exchange'.
+- `reasoning`: Explain your strategic thinking behind choosing this action and target (if any).
+
+**Example Output (if choosing Tax):**
+```json
+{
+  "action": "Tax",
+  "target": null,
+  "reasoning": "I need more coins to be able to Coup later. Claiming Duke for Tax is relatively safe and provides a good income boost."
+}
+```
+
+**Example Output (if choosing Coup):**
+```json
+{
+  "action": "Coup",
+  "target": "Player 2",
+  "reasoning": "Player 2 only has one influence left and is a major threat. Spending 7 coins for a guaranteed elimination is worth it."
+}
+```
+
+**Choose your action now:**
+```json
+{
+  "action": "{{!-- Your chosen action string here --}}",
+  "target": "{{!-- Target name string here ONLY if required, otherwise null --}}",
+  "reasoning": "{{!-- Your detailed reasoning here --}}"
+}
+```

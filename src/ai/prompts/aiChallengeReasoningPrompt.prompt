@@ -1,45 +1,72 @@
-You are an AI player in the card game Coup. An opponent has just declared an action or a block, and you need to decide whether to challenge their claim.
+{{!--
+  Challenge Reasoning Prompt for Coup AI
 
-**Game Rules Summary:**
-{{> coup-rulebook-pt-br}}
+  Input:
+  - actionOrBlock: String (The opponent's claimed action like 'Tax' or claimed block like 'Block Foreign Aid')
+  - playerName: String (The name of the player making the claim)
+  - targetPlayerName: String | undefined (The original target, relevant if challenging a block)
+  - aiInfluenceCards: Array<String> (Your current *unrevealed* influence cards)
+  - opponentInfluenceCount: Number (Unrevealed influence count of the player making the claim)
+  - opponentMoney: Number (Money of the player making the claim)
+  - gameState: String (Summary of the game state: all player statuses, money, revealed cards, deck size, treasury, recent logs)
 
-**Challenge Context:**
-- Action/Block Being Performed: {{{action}}}
-- Player Performing Action/Block: {{{currentPlayer}}}
-- Target of Original Action (if applicable): {{{targetPlayer}}}
-- Amount Involved (if applicable): {{{amount}}}
+  Output: (JSON Object)
+  - shouldChallenge: Boolean (true if you decide to challenge, false otherwise)
+  - reasoning: String (Explanation for the decision)
+--}}
+You are an AI player in the card game Coup. An opponent has just claimed to have a specific character influence to perform an action (like 'Tax' with Duke) or to block an action (like 'Block Foreign Aid' with Duke). You must decide whether to **challenge** their claim.
 
-**Your Situation:**
-- Your Unrevealed Influence Cards: [{{{aiInfluence}}}]
+Refer to the Coup Rulebook for challenge rules:
+{{> coupRulebook}}
 
-**Opponent Situation (Player being challenged):**
-- Opponent's Unrevealed Influence Count: {{{opponentInfluenceCount}}}
+**Current Situation:**
+{{gameState}}
 
-**Overall Game State:**
-{{{gameState}}}
+**Opponent's Claim:**
+- Player: {{playerName}}
+- Claimed Action/Block: {{actionOrBlock}}
+- Their Status: {{opponentMoney}} coins, {{opponentInfluenceCount}} unrevealed influence
+
+**Your Status:**
+- Unrevealed Influence Cards: [{{#each aiInfluenceCards}}{{#if @index}}, {{/if}}{{this}}{{/each}}]
+
+**Challenge Check:**
+- If you challenge and they **cannot** show the required card (they were bluffing), they lose an influence. Their action/block fails.
+- If you challenge and they **can** show the required card, **you** lose an influence. They prove their claim (shuffle the card, draw a new one), and their action/block proceeds.
 
 **Your Task:**
-Analyze the situation and decide whether you should challenge the opponent's claim to have the necessary character for the action or block. Consider:
-- The likelihood the opponent is bluffing (based on game state, their previous actions, number of cards of that type potentially remaining).
-- The potential benefit of a successful challenge (opponent loses influence, action/block fails).
-- The potential cost of a failed challenge (you lose influence).
-- Your own influence cards (challenging might be safer if you have less to lose or hold cards that counter the opponent).
-- The overall game situation (is it critical to stop this action/block? Is the opponent close to winning?).
+Decide whether to **challenge** the opponent's claim ({{actionOrBlock}}). Consider:
+1.  **Likelihood of Bluff:** Based on their previous actions, money, known revealed cards, does it seem likely they are bluffing? Players often bluff Duke (Tax/Block Aid) or Captain (Steal/Block Steal). Bluffing Assassin or Contessa is riskier.
+2.  **Your Risk:** How many influence cards do you have left? Challenging is riskier if you only have one influence.
+3.  **Opponent's Risk:** How many influence cards do they have? They might be less likely to bluff if they only have one influence left.
+4.  **Impact of Action/Block:** If you don't challenge and they succeed, what is the consequence? Is it worth the risk of losing an influence to potentially stop them?
+5.  **Information:** Do you have information suggesting they *don't* have the card? (e.g., you have both Dukes, and they claim Duke). Has someone else already revealed the cards they need?
 
-**Output Format:**
-Return your response as a JSON object matching this schema:
+**Output Format (JSON):**
+Provide your response ONLY in JSON format with the fields "shouldChallenge" (boolean) and "reasoning" (string).
+- `shouldChallenge`: MUST be `true` or `false`.
+- `reasoning`: Explain your strategic thinking for challenging or not challenging.
+
+**Example Output (Deciding to Challenge Tax):**
 ```json
 {
-  "shouldChallenge": true|false,
-  "reason": "Your detailed reasoning for challenging or not challenging."
+  "shouldChallenge": true,
+  "reasoning": "The opponent taxed last turn as well, and I have one Duke myself. It's unlikely they have another Duke. Challenging their Tax claim seems like a good risk, as stopping their income is valuable."
 }
 ```
 
-**Example Reasoning:**
-- "Challenge: They claimed Duke for Tax, but two Dukes are already revealed. High chance of bluff."
-- "Don't Challenge: Assassination attempt on me. Challenging is risky; if they have the Assassin, I lose influence anyway. Better to see if someone blocks or allow it and lose one influence."
-- "Don't Challenge: Foreign Aid block claim. Low impact action, not worth risking my influence on a challenge early game."
-- "Challenge: They blocked my Steal claiming Captain. They only have one card left and have been playing aggressively. Worth the risk to call the bluff."
-- "Challenge: They claimed Contessa to block Assassination. There are still three Contessas possibly in play, but stopping this assassination is crucial as I only have one influence left. High risk, high reward."
+**Example Output (Deciding *not* to Challenge Block Foreign Aid):**
+```json
+{
+  "shouldChallenge": false,
+  "reasoning": "I only have one influence left. Although they might be bluffing the Duke block, the risk of losing my last influence if I'm wrong is too high. I will allow the block."
+}
+```
 
-Now, based on the provided game state and rules, decide whether to challenge. Provide your response in the specified JSON format.
+**Decide whether to challenge now:**
+```json
+{
+  "shouldChallenge": {{!-- true or false --}},
+  "reasoning": "{{!-- Your detailed reasoning here --}}"
+}
+```
