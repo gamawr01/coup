@@ -1203,8 +1203,10 @@ export async function handleAIAction(gameState: GameState): Promise<GameState> {
               }
 
                // Perform the chosen action - This will handle challenges/blocks and eventually call advanceTurn itself
-               console.log(`[handleAIAction] Calling performAction for AI: Action=${chosenAction}, TargetID=${targetPlayerId || 'N/A'}`);
+               console.log(`[handleAIAction] --- Calling performAction for AI: PlayerID=${aiPlayer.id}, Action=${chosenAction}, TargetID=${targetPlayerId || 'N/A'} ---`);
                stateAfterAction = await performAction(newState, aiPlayer.id, chosenAction, targetPlayerId);
+               console.log(`[handleAIAction] --- Returned from performAction for AI ${aiPlayer.name}'s ${chosenAction}. State updated. ---`);
+
          }
 
     } catch (error: any) {
