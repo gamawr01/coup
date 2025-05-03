@@ -1,9 +1,10 @@
+
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
 import { GameBoard } from '@/components/game-board';
 import type { GameState, ActionType, CardType, GameResponseType } from '@/lib/game-types';
-import { initializeGame, performAction, handlePlayerResponse, handleExchangeSelection, forceRevealInfluence } from '@/lib/game-logic';
+import { initializeGame, performAction, handlePlayerResponse, handleExchangeSelection } from '@/lib/game-logic'; // Removed forceRevealInfluence import as it's not fully implemented yet
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -26,7 +27,7 @@ export default function Home() {
 
   const { toast } = useToast();
 
-  const startGame = () => {
+  const startGame = useCallback(() => {
     if (playerName.trim() === "") {
         toast({ title: "Error", description: "Please enter a player name.", variant: "destructive" });
         return;
@@ -35,57 +36,44 @@ export default function Home() {
          toast({ title: "Error", description: `Number of AI players must be between ${MIN_AI_COUNT} and ${MAX_AI_COUNT}.`, variant: "destructive" });
          return;
     }
-    const initialState = initializeGame([playerName], aiCount);
-    setHumanPlayerId(initialState.players.find(p => !p.isAI)?.id || 'player-0'); // Find the actual human player ID
-    setGameState(initialState);
-    setGameStarted(true);
-    toast({ title: "Game Started!", description: `Playing against ${aiCount} AI opponents.` });
-  };
+    // Use updateGameState to handle the initial state setting and potential immediate AI turn
+    updateGameState(async () => {
+        const initialState = initializeGame([playerName], aiCount);
+        setHumanPlayerId(initialState.players.find(p => !p.isAI)?.id || 'player-0'); // Find the actual human player ID
+        toast({ title: "Game Started!", description: `Playing against ${aiCount} AI opponents.` });
+        setGameStarted(true); // Set gameStarted only after initialization is complete
+        return initialState; // Return the initial state for updateGameState
+    });
+
+  }, [playerName, aiCount, toast]); // Removed updateGameState from dependencies as it's defined below and stable
 
   // Unified state update function with logging and processing flag
- const updateGameState = useCallback(async (newStatePromise: GameState | Promise<GameState>) => {
+ const updateGameState = useCallback(async (newStateOrFn: GameState | Promise<GameState> | (() => Promise<GameState>)) => {
     if (isProcessing) {
         console.warn("Attempted to update game state while already processing.");
         toast({ title: "Busy", description: "Please wait for the current action to complete.", variant: "destructive" });
         return;
     }
     setIsProcessing(true);
+    console.log("Updating game state...");
     try {
-      console.log("Updating game state...");
-      const newState = await newStatePromise; // Resolve promise if it's one
-      console.log("New state received:", newState);
-       setGameState(newState);
+        let newState: GameState;
+        if (typeof newStateOrFn === 'function') {
+            newState = await newStateOrFn();
+        } else {
+            newState = await Promise.resolve(newStateOrFn); // Resolve promise if it's one, or wrap value
+        }
 
-       // Check for winner after state update
+        console.log("New state received:", newState);
+        setGameState(newState); // Update the React state
+
+        // Check for winner after state update
         if (newState.winner) {
              toast({
                title: "Game Over!",
                description: `${newState.winner.name} wins!`,
                duration: 10000, // Keep winner message longer
              });
-        } else if (newState.players[newState.currentPlayerIndex]?.isAI && !newState.challengeOrBlockPhase && !newState.pendingExchange) {
-             // If it's now AI's turn and no pending actions, trigger AI
-             // Add a small delay to allow UI to update before AI potentially updates state again quickly
-              setTimeout(async () => {
-                  console.log("Triggering AI action after state update...");
-                  // Re-fetch the latest state before triggering AI to avoid race conditions
-                  setGameState(currentState => {
-                      if(currentState && currentState.players[currentState.currentPlayerIndex]?.isAI && !currentState.challengeOrBlockPhase && !currentState.pendingExchange && !currentState.winner) {
-                          // Need to call the async logic handling AI turn directly from game-logic
-                          // This requires handleAIAction to be exported or a wrapper function.
-                          // Assuming performAction triggers AI if it's their turn (which it should)
-                          // We might not need explicit trigger here if advanceTurn handles it.
-                          // Let's refine this: The logic to trigger AI should be *inside* advanceTurn or state update handler.
-                          // The `performAction` function itself calls `advanceTurn` which calls `handleAIAction`
-                          // So, we likely don't need to explicitly call AI here. The state update *should* trigger it via useEffect dependency or direct call within logic.
-                          console.log("AI turn detected, logic should handle it.");
-                      }
-                      return currentState; // Return current state to avoid modifying during re-fetch
-                  });
-                 // We previously had an explicit AI trigger here, but it might cause issues.
-                 // Let's rely on the game logic's flow (advanceTurn -> handleAIAction).
-                 // If AI turn doesn't trigger, investigate game-logic flow.
-              }, 500); // 500ms delay
         }
 
     } catch (error) {
@@ -93,7 +81,7 @@ export default function Home() {
          toast({ title: "Error", description: "An error occurred processing the game state.", variant: "destructive" });
     } finally {
          console.log("Finished processing state update.");
-        setIsProcessing(false);
+         setIsProcessing(false); // Ensure processing flag is reset
     }
   }, [isProcessing, toast]); // Add dependencies
 
@@ -101,52 +89,36 @@ export default function Home() {
   const handlePlayerAction = useCallback((action: ActionType, targetId?: string) => {
       if (!gameState || isProcessing || gameState.winner) return;
       console.log(`Human action: ${action}`, targetId);
-      updateGameState(performAction(gameState, humanPlayerId, action, targetId));
+      // Pass an async function to updateGameState that calls performAction
+      updateGameState(() => performAction(gameState, humanPlayerId, action, targetId));
   }, [gameState, humanPlayerId, updateGameState, isProcessing]);
 
   const handlePlayerResponse = useCallback((response: GameResponseType) => {
       if (!gameState || isProcessing || gameState.winner) return;
        console.log(`Human response: ${response}`);
-       updateGameState(handlePlayerResponse(gameState, humanPlayerId, response));
+       // Pass an async function to updateGameState that calls handlePlayerResponse
+       updateGameState(() => handlePlayerResponse(gameState, humanPlayerId, response));
   }, [gameState, humanPlayerId, updateGameState, isProcessing]);
 
    const handlePlayerExchange = useCallback((cardsToKeep: CardType[]) => {
       if (!gameState || isProcessing || gameState.winner) return;
       console.log(`Human exchange selection: ${cardsToKeep.join(', ')}`);
-      updateGameState(handleExchangeSelection(gameState, humanPlayerId, cardsToKeep));
+       // Pass an async function to updateGameState that calls handleExchangeSelection
+      updateGameState(() => handleExchangeSelection(gameState, humanPlayerId, cardsToKeep));
   }, [gameState, humanPlayerId, updateGameState, isProcessing]);
 
-   // Placeholder for Forced Reveal - needs proper trigger logic
+   // Placeholder for Forced Reveal - needs proper trigger logic from game-logic
    const handleForceReveal = useCallback((cardToReveal?: CardType) => {
        if (!gameState || isProcessing || gameState.winner) return;
         console.log(`Human forced reveal: ${cardToReveal || 'auto'}`);
-        // updateGameState(forceRevealInfluence(gameState, humanPlayerId, cardToReveal)); // Needs integration
-        toast({ title: "Reveal", description: `Revealing ${cardToReveal ? cardToReveal : 'influence'}. (Logic Pending)`, variant: "default"});
+        // This action needs to be triggered by game-logic when a player *must* reveal.
+        // Example: updateGameState(() => forceRevealInfluence(gameState, humanPlayerId, cardToReveal));
+        toast({ title: "Reveal", description: `Revealing ${cardToReveal ? cardToReveal : 'influence'}. (Manual Trigger - Needs Logic Update)`, variant: "default"});
    }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
 
 
-   // Effect to handle AI turn initiation when it becomes their turn
-   // This might be redundant if advanceTurn handles it correctly. Test thoroughly.
-    useEffect(() => {
-        if (gameState && gameState.players[gameState.currentPlayerIndex]?.isAI &&
-            !gameState.challengeOrBlockPhase && !gameState.pendingExchange &&
-            !gameState.winner && !isProcessing) {
-
-            // Delay slightly to let UI catch up and prevent rapid state changes
-            const timer = setTimeout(async () => {
-                console.log(`UseEffect triggering AI for ${gameState.players[gameState.currentPlayerIndex].name}`);
-                 // IMPORTANT: Ensure updateGameState handles potential promises returned by AI logic
-                 // We need game-logic to expose an async function that handles AI turn.
-                 // Let's assume advanceTurn or the action functions already call the necessary async AI logic.
-                 // If AI actions are not happening, the trigger point needs to be in game-logic.ts (e.g., inside advanceTurn).
-                 // This useEffect might just log or ensure processing state is correct.
-                 // updateGameState(handleAITurn(gameState)); // Replace handleAITurn with actual function from game-logic if needed
-                 console.log("AI's turn - game logic should be handling the action.");
-            }, 1000); // Delay AI action slightly
-
-            return () => clearTimeout(timer);
-        }
-    }, [gameState?.currentPlayerIndex, gameState?.challengeOrBlockPhase, gameState?.pendingExchange, gameState?.winner, isProcessing, updateGameState, gameState]); // Dependencies trigger when turn changes or phases end
+   // Removed the useEffect hook that tried to handle AI turns.
+   // This is now handled within the `advanceTurn` function in `game-logic.ts`.
 
 
   if (!gameStarted) {
