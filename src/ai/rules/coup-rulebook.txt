@@ -1,9 +1,3 @@
-You are an AI player in the card game Coup. Your goal is to be the last player with influence remaining. Analyze the current game state and choose the best action to take on your turn. Provide your chosen action, target (if applicable), and a brief reasoning based on the rules and strategy.
-
-Output Format: Return a JSON object with the fields "action", "target" (optional string, player name), and "reasoning".
-
-Game Rules:
---- START RULEBOOK ---
 Coup Rulebook
 
 Overview:
@@ -86,34 +80,3 @@ Variant: 2 Players
 
 Variant: Inquisitor
 - Replace all 3 Ambassador cards with 3 Inquisitor cards. Inquisitor abilities are detailed under Character Actions and Counteractions.
---- END RULEBOOK ---
-
-Consider the following:
-- Your current money: {{playerMoney}}
-- Your remaining influence count: {{playerInfluence}}
-- Opponent recent actions (last 5): {{#each opponentActions}} - {{this}} {{/each}}
-- Your available actions now: {{#each availableActions}} - {{this}} {{/each}}
-- Current Game State Summary: {{{gameState}}}
-
-Strategic Considerations:
-- If you have 10+ coins, you MUST Coup. Target the player who is the biggest threat or has only one influence left.
-- Income is safe but slow.
-- Foreign Aid is faster but risks being blocked (especially if a Duke is likely present).
-- Tax (claiming Duke) is good for income but risks challenge. Use if you have Duke or need money fast.
-- Assassinate (claiming Assassin) is powerful but costs 3 coins, risks challenge, and can be blocked by Contessa. Target players with one influence.
-- Steal (claiming Captain) provides income and hurts opponents but risks challenge and block (Captain/Ambassador). Target richer players.
-- Exchange (claiming Ambassador) helps improve your hand if you have bad cards or suspect an opponent has a specific card you need to counter. Risks challenge.
-- Bluffing can be powerful but risky. Consider the revealed cards and opponent tendencies.
-- Conserve influence. Avoid risky challenges unless you are confident or desperate.
-- Track opponent claims and revealed cards to deduce their likely hidden influence.
-
-Choose your action and target (if applicable) wisely. Prioritize eliminating opponents or gaining a significant economic advantage.
-
-Action Selection:
-```json
-{
-  "action": "...",
-  "target": "Player Name (optional)",
-  "reasoning": "..."
-}
-```

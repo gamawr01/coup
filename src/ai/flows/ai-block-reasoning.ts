@@ -44,7 +44,7 @@ export type AIBlockReasoningOutput = z.infer<typeof AIBlockReasoningOutputSchema
 // Load the prompt from the external file
 const blockReasoningPrompt = ai.definePrompt({
     name: 'aiBlockReasoningPrompt', // Matches name in prompt file
-    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'aiBlockReasoningPrompt.prompt'), // Correct path
+    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'aiBlockReasoningPrompt.prompt'), // Correct path including rulebook context
     input: { schema: AIBlockReasoningInputSchema },
     output: { schema: AIBlockReasoningOutputSchema },
      model: 'googleai/gemini-1.5-flash',
@@ -65,17 +65,23 @@ const aiBlockReasoningFlow = ai.defineFlow<
     outputSchema: AIBlockReasoningOutputSchema,
   },
   async (input) => {
+     // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
      const llmResponse = await blockReasoningPrompt.generate({ input });
-     const output = llmResponse.output();
+     // Access output directly in 1.x
+     const output = llmResponse.output;
 
     if (!output) {
-        throw new Error("AI failed to generate a valid block reasoning response.");
+         console.error("AI Block Reasoning Error: No output generated.");
+         return {
+             shouldBlock: false, // Default to not blocking on error
+             reasoning: 'AI failed to generate a valid block reasoning response, defaulting to not blocking.',
+         };
     }
 
      // Validate output
      try {
-         AIBlockReasoningOutputSchema.parse(output);
-         return output;
+          const validatedOutput = AIBlockReasoningOutputSchema.parse(output);
+          return validatedOutput;
      } catch (e) {
          console.error("AI Block Reasoning Output validation failed:", e);
          console.error("Invalid AI output:", output);
@@ -90,16 +96,23 @@ const aiBlockReasoningFlow = ai.defineFlow<
 
 
 export async function aiBlockReasoning(input: AIBlockReasoningInput): Promise<AIBlockReasoningOutput> {
-   console.log("AI Block Reasoning with input:", input);
+   console.log("AI Block Reasoning with input:", JSON.stringify(input, null, 2)); // Pretty print input
    // Map the influence number back to card names if needed by the prompt - assuming prompt takes card names now
+   // This check might be redundant if input always provides cards, but safe to keep.
    const mappedInput = {
        ...input,
-       // Ensure aiPlayerInfluenceCards is passed if the prompt expects it
-       // This mapping might need adjustment based on how `input` is constructed in game-logic.ts
-        aiPlayerInfluenceCards: input.aiPlayerInfluenceCards || [], // Pass the actual cards
+       aiPlayerInfluenceCards: input.aiPlayerInfluenceCards || [], // Ensure it's an array
    };
-   const result = await aiBlockReasoningFlow(mappedInput);
-   console.log("AI Block decision:", result);
-  return result;
+   try {
+       const result = await aiBlockReasoningFlow(mappedInput);
+       console.log("AI Block decision:", result);
+       return result;
+   } catch (error) {
+        console.error("Error in aiBlockReasoningFlow:", error);
+        // Fallback in case the flow itself throws an error
+        return {
+            shouldBlock: false,
+            reasoning: 'An unexpected error occurred during AI block reasoning, defaulting to not blocking.',
+        };
+   }
 }
-

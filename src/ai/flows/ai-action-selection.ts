@@ -38,7 +38,7 @@ export type AIActionSelectionOutput = z.infer<typeof AIActionSelectionOutputSche
 // Load the prompt from the external file
 const selectActionPrompt = ai.definePrompt({
     name: 'selectActionPrompt', // Matches the name in the prompt file
-    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'selectActionPrompt.prompt'), // Correct path
+    promptPath: join(process.cwd(), 'src', 'ai', 'prompts', 'selectActionPrompt.prompt'), // Correct path including rulebook context
     input: { schema: AIActionSelectionInputSchema },
     output: { schema: AIActionSelectionOutputSchema },
      model: 'googleai/gemini-1.5-flash', // Specify model if needed, otherwise uses default
@@ -59,18 +59,26 @@ const aiActionSelectionFlow = ai.defineFlow<
     outputSchema: AIActionSelectionOutputSchema,
   },
   async (input) => {
+    // Use generate instead of invoke (invoke is deprecated/changed in 1.x)
     const llmResponse = await selectActionPrompt.generate({ input });
-    const output = llmResponse.output();
+    // Access output directly in 1.x
+    const output = llmResponse.output;
 
     if (!output) {
-        throw new Error("AI failed to generate a valid action selection response.");
+        console.error("AI Action Selection Error: No output generated.");
+        // Provide a fallback even if generation technically succeeded but output is empty/null
+        return {
+             action: 'Income',
+             reasoning: 'AI failed to generate a valid action selection response, defaulting to Income.',
+         };
     }
 
      // Validate output against schema - Genkit might do this implicitly with response format 'json'
      // but explicit validation is safer.
     try {
-        AIActionSelectionOutputSchema.parse(output);
-        return output;
+        // Validate the generated output against the schema
+        const validatedOutput = AIActionSelectionOutputSchema.parse(output);
+        return validatedOutput;
     } catch (e) {
         console.error("AI Action Selection Output validation failed:", e);
          console.error("Invalid AI output:", output); // Log the invalid output
@@ -85,8 +93,17 @@ const aiActionSelectionFlow = ai.defineFlow<
 
 
 export async function selectAction(input: AIActionSelectionInput): Promise<AIActionSelectionOutput> {
-  console.log("AI Selecting Action with input:", input);
-  const result = await aiActionSelectionFlow(input);
-   console.log("AI Action selected:", result);
-  return result;
+  console.log("AI Selecting Action with input:", JSON.stringify(input, null, 2)); // Pretty print input
+  try {
+      const result = await aiActionSelectionFlow(input);
+      console.log("AI Action selected:", result);
+      return result;
+  } catch (error) {
+       console.error("Error in aiActionSelectionFlow:", error);
+       // Fallback in case the flow itself throws an error
+       return {
+           action: 'Income',
+           reasoning: 'An unexpected error occurred during AI action selection, defaulting to Income.',
+       };
+  }
 }
