@@ -156,10 +156,18 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
     };
 
     // Use previous state if valid, otherwise use the default
-    const baseState: GameState = previousState ? { ...previousState } : defaultState;
+    // Ensure deep copy to avoid mutation issues
+    const baseState: GameState = previousState ? JSON.parse(JSON.stringify(previousState)) : defaultState;
 
-    // Ensure actionLog exists before spreading and add the new message
-    baseState.actionLog = [...(baseState.actionLog || []), errorMessage];
+    // Log the error message
+    console.error(errorMessage); // Log to console
+    baseState.actionLog = [...(baseState.actionLog || []), `Error: ${errorMessage}`]; // Add to game log
+
+    // Optionally clear transient states that might be inconsistent after an error
+    baseState.currentAction = null;
+    baseState.challengeOrBlockPhase = null;
+    baseState.pendingExchange = null;
+
     return baseState;
 }
 
@@ -173,6 +181,7 @@ function logAction(gameState: GameState | null, message: string): GameState {
     // Ensure actionLog exists before spreading
     const currentLog = validGameState.actionLog || [];
     const newLog = [...currentLog, message].slice(-MAX_LOG_ENTRIES);
+    // Return a new object to ensure immutability
     return {
         ...validGameState,
         actionLog: newLog
@@ -187,10 +196,12 @@ function eliminatePlayer(gameState: GameState, playerId: string): GameState {
         // Check if already logged elimination for this player
         if (!newState.actionLog.some(log => log.includes(`${newState.players[playerIndex].name} has been eliminated`))) {
              console.log(`[eliminatePlayer] Eliminating ${newState.players[playerIndex].name}`);
+             // Use logAction to ensure immutability
              newState = logAction(newState, `${newState.players[playerIndex].name} has been eliminated!`);
         }
         // Optionally remove player or just mark as inactive - current logic relies on checking revealed cards
     }
+    // Return potentially updated state
     return newState;
 }
 
@@ -217,14 +228,14 @@ function checkForWinner(gameState: GameState | null): Player | null {
 
 
 // Reveals influence, checks for elimination, returns new state and revealed card type
+// Returns a valid GameState even on error.
 async function revealInfluence(gameState: GameState | null, playerId: string, cardType?: CardType): Promise<{ newState: GameState, revealedCard: CardType | null }> {
     if (!gameState) {
         const errorMsg = `[revealInfluence] Error: Called with null gameState for player ${playerId}.`;
-        console.error(errorMsg);
         return { newState: createErrorState(errorMsg), revealedCard: null };
     }
     console.log(`[revealInfluence] Player ${playerId} needs to reveal${cardType ? ` ${cardType}` : ''}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy for safety
     let revealedCardType: CardType | null = null;
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
 
@@ -284,7 +295,7 @@ async function revealInfluence(gameState: GameState | null, playerId: string, ca
 async function performIncome(gameState: GameState | null, playerId: string): Promise<GameState> {
      if (!gameState) return createErrorState("[performIncome] Error: gameState is null.");
     console.log(`[performIncome] ${playerId} takes Income.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     if (playerIndex !== -1 && newState.treasury > 0) {
         const player = newState.players[playerIndex];
@@ -303,12 +314,11 @@ async function performIncome(gameState: GameState | null, playerId: string): Pro
 async function performForeignAid(gameState: GameState | null, playerId: string): Promise<GameState> {
      if (!gameState) return createErrorState("[performForeignAid] Error: gameState is null.");
     console.log(`[performForeignAid] ${playerId} attempts Foreign Aid.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const player = getPlayerById(newState, playerId);
     if (!player) {
         const errorMsg = `[performForeignAid] Error: Player ${playerId} not found.`;
-        console.error(errorMsg);
-        return logAction(newState, errorMsg);
+        return createErrorState(errorMsg, newState);
     }
 
     newState = logAction(newState, `${player.name} attempts Foreign Aid (+2 coins).`);
@@ -324,11 +334,10 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
             responses: [],
         };
         // AI needs to decide to block here if they are potential blockers
-         newState = await triggerAIResponses(newState);
-         if (!newState) { // Check if triggerAIResponses returned null
-              console.error("[performForeignAid] triggerAIResponses returned null. Reverting.");
-              return logAction(gameState, "[performForeignAid] Error: Failed to trigger AI responses."); // Use original gameState
-         }
+         const stateAfterTrigger = await triggerAIResponses(newState);
+          // triggerAIResponses now always returns a GameState
+         newState = stateAfterTrigger;
+
     } else {
         // No one can block, action succeeds immediately
          console.log(`[performForeignAid] No blockers. Action succeeds.`);
@@ -351,7 +360,7 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
 async function performCoup(gameState: GameState | null, playerId: string, targetId: string): Promise<GameState> {
     if (!gameState) return createErrorState("[performCoup] Error: gameState is null.");
     console.log(`[performCoup] ${playerId} performs Coup against ${targetId}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     const target = getPlayerById(newState, targetId); // Target needed for logging
 
@@ -367,10 +376,6 @@ async function performCoup(gameState: GameState | null, playerId: string, target
         console.log(`[performCoup] Target ${targetId} must reveal influence.`);
         const { newState: revealedState } = await revealInfluence(newState, targetId); // Ensure await here
         newState = revealedState; // Assign revealedState directly
-         if (!newState) { // Check if revealInfluence returned null (should not happen if input was valid)
-              console.error("[performCoup] revealInfluence returned null. Reverting state.");
-              return logAction(gameState, "[performCoup] Error: Failed to reveal influence.");
-         }
 
     } else {
         const errorMsg = `${newState.players[playerIndex]?.name || 'Player'} cannot perform Coup (not enough money or invalid target).`;
@@ -394,12 +399,11 @@ async function performCoup(gameState: GameState | null, playerId: string, target
 async function performTax(gameState: GameState | null, playerId: string): Promise<GameState> {
      if (!gameState) return createErrorState("[performTax] Error: gameState is null.");
     console.log(`[performTax] ${playerId} attempts Tax.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const player = getPlayerById(newState, playerId);
      if (!player) {
           const errorMsg = `[performTax] Error: Player ${playerId} not found.`;
-          console.error(errorMsg);
-          return logAction(newState, errorMsg);
+          return createErrorState(errorMsg, newState);
      }
 
      newState = logAction(newState, `${player.name} attempts to Tax (+3 coins).`);
@@ -413,11 +417,8 @@ async function performTax(gameState: GameState | null, playerId: string): Promis
             possibleResponses: potentialChallengers,
             responses: [],
         };
-        newState = await triggerAIResponses(newState);
-        if (!newState) { // Check if triggerAIResponses returned null
-              console.error("[performTax] triggerAIResponses returned null. Reverting.");
-              return logAction(gameState, "[performTax] Error: Failed to trigger AI responses."); // Use original gameState
-         }
+        const stateAfterTrigger = await triggerAIResponses(newState);
+        newState = stateAfterTrigger;
     } else {
         // No challengers, action succeeds
         console.log(`[performTax] No challengers. Action succeeds.`);
@@ -440,14 +441,13 @@ async function performTax(gameState: GameState | null, playerId: string): Promis
 async function performAssassinate(gameState: GameState | null, playerId: string, targetId: string): Promise<GameState> {
      if (!gameState) return createErrorState("[performAssassinate] Error: gameState is null.");
     console.log(`[performAssassinate] ${playerId} attempts Assassinate against ${targetId}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     const target = getPlayerById(newState, targetId);
 
     if (playerIndex === -1 || !target) {
         const errorMsg = `[performAssassinate] Invalid player or target. PlayerIndex: ${playerIndex}, Target: ${!!target}`;
-        console.error(errorMsg);
-        return logAction(newState, errorMsg);
+        return createErrorState(errorMsg, newState);
     }
     const player = newState.players[playerIndex];
 
@@ -476,21 +476,15 @@ async function performAssassinate(gameState: GameState | null, playerId: string,
             possibleResponses: potentialResponders,
             responses: [],
         };
-         newState = await triggerAIResponses(newState);
-         if (!newState) { // Check if triggerAIResponses returned null
-              console.error("[performAssassinate] triggerAIResponses returned null. Reverting.");
-              return logAction(gameState, "[performAssassinate] Error: Failed to trigger AI responses."); // Use original gameState
-         }
+         const stateAfterTrigger = await triggerAIResponses(newState);
+         newState = stateAfterTrigger;
+
     } else {
         // No one can challenge or block, assassination proceeds immediately
          console.log(`[performAssassinate] No responders. Assassination succeeds.`);
         newState = logAction(newState, `${player.name}'s Assassination attempt automatically succeeds.`);
         const { newState: revealedState } = await revealInfluence(newState, targetId);
          newState = revealedState; // Assign revealedState directly
-         if (!newState) { // Check if revealInfluence returned null
-              console.error("[performAssassinate] revealInfluence returned null after auto-success. Reverting.");
-              return logAction(gameState, "[performAssassinate] Error: Failed to reveal influence after auto-success."); // Use original gameState
-         }
         newState = await advanceTurn(newState);
     }
      return newState;
@@ -500,14 +494,13 @@ async function performAssassinate(gameState: GameState | null, playerId: string,
 async function performSteal(gameState: GameState | null, playerId: string, targetId: string): Promise<GameState> {
      if (!gameState) return createErrorState("[performSteal] Error: gameState is null.");
     console.log(`[performSteal] ${playerId} attempts Steal from ${targetId}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const player = getPlayerById(newState, playerId);
     const target = getPlayerById(newState, targetId);
 
     if (!player || !target) {
         const errorMsg = `[performSteal] Invalid player or target. Player: ${!!player}, Target: ${!!target}`;
-        console.error(errorMsg);
-        return logAction(newState, errorMsg);
+        return createErrorState(errorMsg, newState);
     }
      if (target.money === 0) {
           const infoMsg = `${player.name} attempts to Steal from ${target.name}, but they have no money.`;
@@ -529,11 +522,9 @@ async function performSteal(gameState: GameState | null, playerId: string, targe
             possibleResponses: potentialResponders, // Includes the target who can block
             responses: [],
         };
-         newState = await triggerAIResponses(newState);
-         if (!newState) { // Check if triggerAIResponses returned null
-              console.error("[performSteal] triggerAIResponses returned null. Reverting.");
-              return logAction(gameState, "[performSteal] Error: Failed to trigger AI responses."); // Use original gameState
-         }
+         const stateAfterTrigger = await triggerAIResponses(newState);
+         newState = stateAfterTrigger;
+
     } else {
         // No one can challenge or block, steal succeeds
          console.log(`[performSteal] No responders. Steal succeeds.`);
@@ -561,12 +552,11 @@ async function performSteal(gameState: GameState | null, playerId: string, targe
 async function performExchange(gameState: GameState | null, playerId: string): Promise<GameState> {
       if (!gameState) return createErrorState("[performExchange] Error: gameState is null.");
      console.log(`[performExchange] ${playerId} attempts Exchange.`);
-     let newState = { ...gameState };
+     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
      const player = getPlayerById(newState, playerId);
       if (!player) {
           const errorMsg = `[performExchange] Error: Player ${playerId} not found.`;
-          console.error(errorMsg);
-          return logAction(newState, errorMsg);
+          return createErrorState(errorMsg, newState);
       }
 
      newState = logAction(newState, `${player.name} attempts Exchange.`);
@@ -580,19 +570,13 @@ async function performExchange(gameState: GameState | null, playerId: string): P
             possibleResponses: potentialChallengers,
             responses: [],
         };
-        newState = await triggerAIResponses(newState);
-        if (!newState) { // Check if triggerAIResponses returned null
-              console.error("[performExchange] triggerAIResponses returned null. Reverting.");
-              return logAction(gameState, "[performExchange] Error: Failed to trigger AI responses."); // Use original gameState
-         }
+        const stateAfterTrigger = await triggerAIResponses(newState);
+        newState = stateAfterTrigger;
     } else {
         // No challengers, exchange proceeds
          console.log(`[performExchange] No challengers. Initiating exchange.`);
         newState = await initiateExchange(newState, player); // Make initiateExchange async
-         if (!newState) { // Check if initiateExchange returned null
-              console.error("[performExchange] initiateExchange returned null. Reverting.");
-              return logAction(gameState, "[performExchange] Error: Failed to initiate exchange."); // Use original gameState
-         }
+
         // Turn doesn't advance until exchange is complete
     }
     return newState;
@@ -602,7 +586,7 @@ async function performExchange(gameState: GameState | null, playerId: string): P
 async function initiateExchange(gameState: GameState | null, player: Player): Promise<GameState> {
      if (!gameState) return createErrorState(`[initiateExchange] Error: gameState is null for player ${player?.id}.`);
     console.log(`[initiateExchange] Initiating exchange for ${player.name}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const { card: card1, remainingDeck: deckAfter1 } = drawCard(newState.deck);
     const { card: card2, remainingDeck: deckAfter2 } = drawCard(deckAfter1);
 
@@ -623,10 +607,7 @@ async function initiateExchange(gameState: GameState | null, player: Player): Pr
     if(player.isAI) {
         console.log(`[initiateExchange] Player ${player.name} is AI. Handling AI exchange.`);
         newState = await handleAIExchange(newState); // Make handleAIExchange async
-        if (!newState) { // Check if handleAIExchange returned null
-              console.error("[initiateExchange] handleAIExchange returned null. Reverting.");
-              return logAction(gameState, "[initiateExchange] Error: Failed to handle AI exchange."); // Use original gameState
-         }
+
     } else {
         console.log(`[initiateExchange] Player ${player.name} is Human. Waiting for UI selection.`);
     }
@@ -639,15 +620,16 @@ async function initiateExchange(gameState: GameState | null, player: Player): Pr
 async function completeExchange(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState> {
     if (!gameState) return createErrorState(`[completeExchange] Error: gameState is null for player ${playerId}.`);
     console.log(`[completeExchange] Player ${playerId} completes exchange, keeping: ${cardsToKeep.join(', ')}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     const exchangeInfo = newState.pendingExchange;
 
     if (playerIndex === -1 || !exchangeInfo || exchangeInfo.player.id !== playerId) {
         const errorMsg = `[completeExchange] Invalid state for completing exchange. Phase: ${JSON.stringify(exchangeInfo)}`;
-        console.error(errorMsg);
-         newState.pendingExchange = null; // Attempt to clear invalid phase
-        return logAction(newState, errorMsg);
+         // Attempt to clear invalid phase and return error state
+         const stateWithError = logAction(newState, errorMsg);
+         if(stateWithError) stateWithError.pendingExchange = null;
+         return stateWithError || createErrorState(errorMsg, gameState); // Return error state or fallback
     }
     const player = newState.players[playerIndex];
 
@@ -706,7 +688,8 @@ async function completeExchange(gameState: GameState | null, playerId: string, c
 async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState> {
      // No null check needed here, called internally by functions that already check
     console.log(`[resolveChallengeOrBlock] Resolving phase for action: ${gameState.challengeOrBlockPhase?.action}`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeResolve = JSON.parse(JSON.stringify(gameState)); // For fallback
     const phase = newState.challengeOrBlockPhase;
     if (!phase) {
         console.warn("[resolveChallengeOrBlock] Phase is already null. Returning state.");
@@ -718,9 +701,8 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
      // Safety check if players were somehow removed during the phase (unlikely)
      if (!actionPlayer) {
          const errorMsg = `[resolveChallengeOrBlock] Error: Action player ${phase.actionPlayer.id} not found during resolution.`;
-         console.error(errorMsg);
          newState.challengeOrBlockPhase = null; // Clear invalid phase
-         return logAction(newState, errorMsg);
+         return createErrorState(errorMsg, newState);
      }
 
 
@@ -742,10 +724,7 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
         console.log(`[resolveChallengeOrBlock] Challenge found from ${challengerId}.`);
         // Pass the *original* action and players from the phase data, but use current game state
         newState = await resolveChallenge(newState, phase.actionPlayer.id, challengerId, action);
-        if (!newState) { // Check if resolveChallenge returned null
-              console.error("[resolveChallengeOrBlock] resolveChallenge returned null. Reverting.");
-              return logAction(gameState, "[resolveChallengeOrBlock] Error: Failed to resolve challenge."); // Use original gameState BEFORE phase was cleared
-         }
+
     } else if (blocks.length > 0) {
         // Handle Block (only one block happens, but it could be challenged)
         const blockerId = blocks[0].playerId;
@@ -755,10 +734,7 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
         // Pass the potentially updated actionPlayer state
         const currentActionPlayer = getPlayerById(newState, actionPlayer.id)!; // Refresh action player state
         newState = await resolveBlock(newState, currentActionPlayer, targetPlayer, blockerId, action as ActionType, blockType); // action must be ActionType here
-        if (!newState) { // Check if resolveBlock returned null
-              console.error("[resolveChallengeOrBlock] resolveBlock returned null. Reverting.");
-              return logAction(gameState, "[resolveChallengeOrBlock] Error: Failed to resolve block."); // Use original gameState BEFORE phase was cleared
-         }
+
     } else {
         // No challenges or blocks, action succeeds
         console.log(`[resolveChallengeOrBlock] No challenges or blocks. Action ${action} succeeds.`);
@@ -766,10 +742,7 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
         const currentActionPlayer = getPlayerById(newState, actionPlayer.id)!;
         newState = logAction(newState, `No challenges or blocks. ${currentActionPlayer.name}'s ${action} attempt succeeds.`);
         newState = await executeSuccessfulAction(newState, currentActionPlayer, action as ActionType, targetPlayer); // action must be ActionType here
-         if (!newState) { // Check if executeSuccessfulAction returned null
-              console.error("[resolveChallengeOrBlock] executeSuccessfulAction returned null after no challenge/block. Reverting.");
-              return logAction(gameState, "[resolveChallengeOrBlock] Error: Failed to execute successful action."); // Use original gameState BEFORE phase was cleared
-         }
+
     }
 
     console.log(`[resolveChallengeOrBlock] Phase resolution complete.`);
@@ -781,16 +754,15 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
 async function resolveChallenge(gameState: GameState, challengedPlayerId: string, challengerId: string, action: ActionType | BlockActionType): Promise<GameState> {
     // No null check needed here, called internally by functions that already check
     console.log(`[resolveChallenge] ${challengerId} challenges ${challengedPlayerId}'s claim for ${action}.`);
-    let newState = { ...gameState };
-    const stateBeforeResolve = { ...gameState }; // For fallback
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeResolve = JSON.parse(JSON.stringify(gameState)); // For fallback
     const challengedPlayer = getPlayerById(newState, challengedPlayerId);
     const challenger = getPlayerById(newState, challengerId);
 
      // Safety Checks
      if (!challengedPlayer || !challenger) {
          const errorMsg = `[resolveChallenge] Error: Challenged player (${challengedPlayerId}) or Challenger (${challengerId}) not found.`;
-         console.error(errorMsg);
-         return logAction(newState, errorMsg);
+         return createErrorState(errorMsg, newState);
      }
 
 
@@ -819,10 +791,7 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
               newState = await advanceTurn(newState);
          } else { // Challenged an action
               newState = await executeSuccessfulAction(newState, challengedPlayer, action as ActionType, originalTarget);
-              if (!newState) { // Check if executeSuccessfulAction returned null
-                 console.error("[resolveChallenge] executeSuccessfulAction returned null after challenge error. Reverting.");
-                 return logAction(stateBeforeResolve, "[resolveChallenge] Error executing action after challenge error.");
-             }
+
          }
          return newState;
     }
@@ -871,10 +840,7 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
                   // As a fallback, reveal *any* unrevealed card to prevent game getting stuck
                  const { newState: revealFallbackState } = await revealInfluence(newState, challengedPlayerId);
                  newState = revealFallbackState;
-                 if (!newState) {
-                     console.error("[resolveChallenge] Fallback revealInfluence returned null. Reverting.");
-                     return logAction(stateBeforeResolve, "[resolveChallenge] Error: Failed to fallback reveal influence.");
-                 }
+
 
             }
         }
@@ -884,18 +850,13 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
          console.log(`[resolveChallenge] Challenger ${challenger.name} must reveal.`);
         const { newState: revealedState } = await revealInfluence(newState, challengerId); // await reveal
          newState = revealedState; // Assign revealedState directly
-         if (!newState) { // Check if revealInfluence returned null
-             console.error("[resolveChallenge] revealInfluence returned null for challenger. Reverting.");
-             return logAction(stateBeforeResolve, "[resolveChallenge] Error: Failed to reveal challenger influence.");
-         }
 
         // Check if challenger eliminated before proceeding
         const challengerStillActive = getActivePlayers(newState).some(p => p.id === challengerId);
         const challengedActionPlayer = getPlayerById(newState, challengedPlayerId); // Get potentially updated state
           if (!challengedActionPlayer) { // Safety check
                const errorMsg = `[resolveChallenge] Error: Challenged player ${challengedPlayerId} not found after challenger reveal.`;
-               console.error(errorMsg);
-               return logAction(newState, errorMsg);
+               return createErrorState(errorMsg, newState);
            }
          // Retrieve original target from the *current action* if available, as phase is cleared
          // Use the state *before* this function call for currentAction context
@@ -931,10 +892,7 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
          } else {
               // Action was challenged and proven true, action proceeds
               newState = await executeSuccessfulAction(newState, challengedActionPlayer, action as ActionType, originalTarget);
-               if (!newState) { // Check if executeSuccessfulAction returned null
-                 console.error("[resolveChallenge] executeSuccessfulAction returned null after failed challenge. Reverting.");
-                 return logAction(stateBeforeResolve, "[resolveChallenge] Error executing action after failed challenge.");
-             }
+
          }
 
 
@@ -944,10 +902,6 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
         // Challenged player loses influence because they bluffed
         const { newState: revealedState } = await revealInfluence(newState, challengedPlayerId); // await reveal
         newState = revealedState; // Assign revealedState directly
-        if (!newState) { // Check if revealInfluence returned null
-             console.error("[resolveChallenge] revealInfluence returned null for challenged player. Reverting.");
-             return logAction(stateBeforeResolve, "[resolveChallenge] Error: Failed to reveal challenged player influence.");
-         }
 
         // Check if challenged player eliminated
          const challengedStillActive = getActivePlayers(newState).some(p => p.id === challengedPlayerId);
@@ -977,10 +931,7 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
                if (originalAction && originalActionPlayer) {
                    newState = logAction(newState, `${challengedPlayer.name}'s block fails. ${originalActionPlayer.name}'s ${originalAction} proceeds.`);
                    newState = await executeSuccessfulAction(newState, originalActionPlayer, originalAction, originalTarget);
-                    if (!newState) { // Check if executeSuccessfulAction returned null
-                         console.error("[resolveChallenge] executeSuccessfulAction returned null after successful block challenge. Reverting.");
-                         return logAction(stateBeforeResolve, "[resolveChallenge] Error executing action after successful block challenge.");
-                    }
+
                } else {
                     const errorMsg = `[resolveChallenge] Error retrieving original action/player after failed block challenge.`;
                     console.error(errorMsg);
@@ -1006,15 +957,14 @@ async function resolveChallenge(gameState: GameState, challengedPlayerId: string
 async function resolveBlock(gameState: GameState, actionPlayer: Player, targetPlayer: Player | undefined, blockerId: string, action: ActionType, blockType: BlockActionType): Promise<GameState> {
     // No null check needed here, called internally by functions that already check
     console.log(`[resolveBlock] ${blockerId} blocks ${actionPlayer.name}'s ${action} with ${blockType}.`);
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const blocker = getPlayerById(newState, blockerId);
     const currentActionPlayer = getPlayerById(newState, actionPlayer.id); // Refresh action player state
 
     // Safety checks
      if (!blocker || !currentActionPlayer) {
          const errorMsg = `[resolveBlock] Error: Blocker (${blockerId}) or Action Player (${actionPlayer.id}) not found.`;
-         console.error(errorMsg);
-         return logAction(newState, errorMsg);
+         return createErrorState(errorMsg, newState);
      }
 
 
@@ -1034,10 +984,6 @@ async function resolveBlock(gameState: GameState, actionPlayer: Player, targetPl
      // Trigger AI/Player response for the challenge against the block
       console.log(`[resolveBlock] Triggering responses for challenge-the-block.`);
      newState = await triggerAIResponses(newState); // Will handle both AI and Human (by waiting)
-      if (!newState) { // Check if triggerAIResponses returned null
-         console.error("[resolveBlock] triggerAIResponses returned null. Reverting.");
-         return logAction(gameState, "[resolveBlock] Error: Failed to trigger AI responses for block challenge."); // Use original gameState
-     }
 
      return newState; // State waits for challenge decision against the block
 }
@@ -1047,8 +993,8 @@ async function resolveBlock(gameState: GameState, actionPlayer: Player, targetPl
 async function executeSuccessfulAction(gameState: GameState | null, player: Player, action: ActionType, target?: Player): Promise<GameState> {
      if (!gameState) return createErrorState(`[executeSuccessfulAction] Error: gameState is null for player ${player?.id}.`);
     console.log(`[executeSuccessfulAction] Executing successful ${action} for ${player.name}${target ? ` targeting ${target.name}`: ''}.`);
-    let newState = { ...gameState };
-    const stateBeforeExecute = { ...gameState }; // Fallback
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeExecute = JSON.parse(JSON.stringify(gameState)); // Fallback
     const playerIndex = newState.players.findIndex(p => p.id === player.id);
     const targetIndex = target ? newState.players.findIndex(p => p.id === target.id) : -1;
 
@@ -1061,8 +1007,7 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
     const currentPlayer = playerIndex !== -1 ? newState.players[playerIndex] : undefined;
      if (!currentPlayer) {
           const errorMsg = `[executeSuccessfulAction] Error: Player ${player.id} not found in current state.`;
-          console.error(errorMsg);
-         return logAction(newState, errorMsg);
+         return createErrorState(errorMsg, newState);
      }
 
     switch (action) {
@@ -1097,10 +1042,7 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
                  newState = logAction(newState, `Assassination against ${currentTarget.name} succeeds.`);
                  const { newState: revealedState } = await revealInfluence(newState, currentTarget.id); // await reveal
                  newState = revealedState; // Assign directly
-                 if (!newState) { // Check if reveal returned null
-                    console.error("[executeSuccessfulAction] revealInfluence returned null after Assassinate success. Reverting.");
-                    return logAction(stateBeforeExecute, "[executeSuccessfulAction] Error revealing influence after Assassinate.");
-                 }
+
              } else if (targetIndex !== -1 && (!targetStillActive || !currentTarget)) {
                   const infoMsg = `Assassination target ${target?.name || target?.id} was already eliminated or not found.`;
                   console.log(`[executeSuccessfulAction] ${infoMsg}`);
@@ -1141,10 +1083,7 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
         case 'Exchange':
              console.log(`[executeSuccessfulAction] Exchange approved, initiating exchange process for ${currentPlayer.name}.`);
             newState = await initiateExchange(newState, currentPlayer); // await exchange initiation
-            if (!newState) { // Check if initiateExchange returned null
-                 console.error("[executeSuccessfulAction] initiateExchange returned null. Reverting.");
-                 return logAction(stateBeforeExecute, "[executeSuccessfulAction] Error initiating exchange.");
-            }
+
              // Turn advances after exchange completion (handled in completeExchange)
             break;
         // Income and Coup are handled directly and don't go through challenge phase or this function
@@ -1163,7 +1102,7 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
 async function advanceTurn(gameState: GameState | null): Promise<GameState> {
     if (!gameState) return createErrorState("[advanceTurn] Error: gameState is null.");
     console.log("[advanceTurn] Advancing turn...");
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
 
     // 1. Check for Winner *before* advancing index
     const winner = checkForWinner(newState);
@@ -1194,8 +1133,7 @@ async function advanceTurn(gameState: GameState | null): Promise<GameState> {
     const nextPlayer = newState.players[nextPlayerIndex];
      if (!nextPlayer) { // Safety check
           const errorMsg = `[advanceTurn] Error: Could not find next player at index ${nextPlayerIndex}.`;
-          console.error(errorMsg);
-          return logAction(newState, errorMsg); // Log error and return current state to avoid crash
+          return createErrorState(errorMsg, newState); // Return error state
      }
     newState = logAction(newState, `--- ${nextPlayer.name}'s turn ---`);
     console.log(`[advanceTurn] New turn for player index ${nextPlayerIndex}: ${nextPlayer.name} (${nextPlayer.isAI ? 'AI' : 'Human'})`);
@@ -1350,19 +1288,18 @@ function generateGameStateDescription(gameState: GameState, aiPlayerId: string):
 
 
 // Export handleAIAction so it can be called by page.tsx for the first turn or via button trigger
-export async function handleAIAction(gameState: GameState | null): Promise<GameState | null> { // Return GameState | null
+export async function handleAIAction(gameState: GameState | null): Promise<GameState> {
     if (!gameState) return createErrorState("[handleAIAction] Error: gameState is null.");
     console.log(`[handleAIAction] >>> Entering for ${gameState.players[gameState.currentPlayerIndex]?.name || 'UNKNOWN PLAYER'}`);
-    let newState = { ...gameState }; // Make a copy to potentially return on error
-    const stateBeforeAIAction = { ...gameState }; // Fallback
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeAIAction = JSON.parse(JSON.stringify(gameState)); // Fallback
     const aiPlayer = newState.players[newState.currentPlayerIndex];
 
     // Safety checks
     if (!aiPlayer || !aiPlayer.isAI) {
          const errorMsg = `[handleAIAction] Error: Called for non-AI player (${aiPlayer?.name}) or invalid player index (${newState.currentPlayerIndex}).`;
-         console.error(errorMsg);
          newState.needsHumanTriggerForAI = false; // Ensure flag is off if error
-         return logAction(newState, errorMsg); // Return state with error logged
+         return createErrorState(errorMsg, newState);
     }
      if (!aiPlayer.influence.some(c => !c.revealed)) {
          const infoMsg = `[handleAIAction] AI ${aiPlayer.name} is eliminated. Advancing turn.`;
@@ -1400,7 +1337,7 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
             revealedCards: p.influence.filter(inf => inf.revealed).map(inf => inf.type),
         }));
 
-    let stateAfterAction: GameState | null = null; // Use null to indicate potential failure
+    let stateAfterAction: GameState = newState; // Initialize with current state
     let aiDecisionAction: ActionType | null = null; // Track chosen action for error reporting
 
     try {
@@ -1445,8 +1382,7 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
                              newState = logAction(newState, errorMsg);
                              stateAfterAction = await performIncome(newState, aiPlayer.id); // Default safe action
                              console.log(`[handleAIAction] <<< Exiting for ${aiPlayer.name} (Fallback Income)`);
-                             // Return fallback or original if fallback failed
-                             return stateAfterAction || logAction(stateBeforeAIAction, "Fallback Income failed.");
+                             return stateAfterAction;
                         }
                    } else {
                        // AI provided target name, try to find ID among *active* opponents
@@ -1468,8 +1404,7 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
                                newState = logAction(newState, errorMsg);
                                stateAfterAction = await performIncome(newState, aiPlayer.id); // Default safe action
                                console.log(`[handleAIAction] <<< Exiting for ${aiPlayer.name} (Fallback Income)`);
-                               // Return fallback or original if fallback failed
-                               return stateAfterAction || logAction(stateBeforeAIAction, "Fallback Income failed.");
+                               return stateAfterAction;
                            }
                        }
                    }
@@ -1480,6 +1415,7 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
 
                // Perform the chosen action - This will handle challenges/blocks and eventually call advanceTurn itself
                console.log(`[handleAIAction] --- Calling performAction for AI: PlayerID=${aiPlayer.id}, Action=${aiDecisionAction}, TargetID=${targetPlayerId || 'N/A'} ---`);
+               // performAction now always returns a GameState
                stateAfterAction = await performAction(newState, aiPlayer.id, aiDecisionAction, targetPlayerId);
                console.log(`[handleAIAction] --- Returned from performAction for AI ${aiPlayer.name}'s ${aiDecisionAction}. State updated. ---`);
 
@@ -1494,13 +1430,7 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
     }
      console.log(`[handleAIAction] <<< Exiting for ${aiPlayer.name}`);
      // Ensure we always return a valid GameState
-     // Check the state returned by performAction first
-    if (!stateAfterAction) {
-      const errorMsg = `[handleAIAction] performAction returned null after AI action ${aiDecisionAction}. Returning previous state.`;
-      console.error(errorMsg);
-      return logAction(stateBeforeAIAction, errorMsg); // Return the state before the failed performAction call
-    }
-    return stateAfterAction;
+     return stateAfterAction;
 }
 
 
@@ -1508,11 +1438,12 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
 
 // Triggers AI responses during challenge/block phases. Returns the state *after* AIs have responded.
 // IMPORTANT: This function MODIFIES the state by calling handlePlayerResponse, and potentially resolveChallengeOrBlock.
+// Returns a valid GameState even on error.
 async function triggerAIResponses(gameState: GameState | null): Promise<GameState> {
      if (!gameState) return createErrorState("[triggerAIResponses] Error: gameState is null.");
-    let newState = { ...gameState };
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     let currentPhase = newState.challengeOrBlockPhase; // Get the phase state *at the start*
-    let stateBeforeLoop = { ...gameState }; // Keep original state for fallback
+    let stateBeforeLoop = JSON.parse(JSON.stringify(gameState)); // Keep original state for fallback
 
     try {
         // Loop while there's an active phase and AI responders who haven't responded yet
@@ -1632,14 +1563,7 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
             // IMPORTANT: Update the state by calling handlePlayerResponse, which correctly modifies the phase state
             // and potentially resolves the phase or sets up the next challenge.
              const stateAfterResponse = await handlePlayerResponse(newState, aiPlayerState.id, decision); // Await the handling
-              if (!stateAfterResponse) {
-                 console.error(`[triggerAIResponses] handlePlayerResponse returned null for AI ${aiPlayerState.name}'s response (${decision}). Breaking loop.`);
-                 // Attempt to revert to state *before* this AI's response
-                 newState = logAction(stateBeforeLoop, `[triggerAIResponses] Error processing AI ${aiPlayerState.name}'s response. Reverting phase state.`);
-                 newState.challengeOrBlockPhase = stateBeforeLoop.challengeOrBlockPhase; // Explicitly revert phase too
-                 break; // Exit the loop as state might be inconsistent
-             }
-             newState = stateAfterResponse; // Update newState with the result
+              newState = stateAfterResponse; // Update newState with the result
 
 
             // Refresh phase state *after* the response has been handled
@@ -1662,7 +1586,7 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
             // If AI Allowed, loop continues to the next AI responder if any.
             console.log(`[triggerAIResponses] AI ${aiPlayerState.name} Allowed. Checking for more AI responders.`);
              // Update stateBeforeLoop for the next iteration's fallback
-             stateBeforeLoop = { ...newState };
+             stateBeforeLoop = JSON.parse(JSON.stringify(newState));
 
 
         } // End AI responder loop
@@ -1680,10 +1604,6 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
     if (finalPhase && finalPhase.possibleResponses.every(p => finalPhase.responses.some(r => r.playerId === p.id))) {
         console.log("[triggerAIResponses] All responses received (likely all 'Allow' or phase resolved differently). Resolving phase...");
         const stateAfterResolve = await resolveChallengeOrBlock(newState); // Resolve based on collected responses
-         if (!stateAfterResolve) { // Check if resolve returned null
-             console.error("[triggerAIResponses] resolveChallengeOrBlock returned null after all responses. Reverting.");
-             return logAction(newState, "[triggerAIResponses] Error: Failed to resolve phase after all responses."); // Use state *before* calling resolve
-         }
          newState = stateAfterResolve; // Update state with resolved state
     } else if (finalPhase) {
         console.log("[triggerAIResponses] Phase still requires responses (likely human). Waiting.");
@@ -1700,14 +1620,15 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
 async function handleAIExchange(gameState: GameState | null): Promise<GameState> {
     if (!gameState) return createErrorState("[handleAIExchange] Error: gameState is null.");
     console.log(`[handleAIExchange] Handling exchange for AI.`);
-    let newState = { ...gameState };
-    const stateBeforeExchange = { ...gameState }; // Fallback state
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeExchange = JSON.parse(JSON.stringify(gameState)); // Fallback state
     const exchangeInfo = newState.pendingExchange;
      if (!exchangeInfo || !exchangeInfo.player.isAI) {
          const errorMsg = "[handleAIExchange] Error: Called without valid AI exchange phase.";
-         console.error(errorMsg);
-          if(newState) newState.pendingExchange = null; // Try to clear invalid phase
-         return logAction(newState || stateBeforeExchange, errorMsg); // Use newState if available, else fallback
+          // Try to clear invalid phase
+          const stateWithError = logAction(newState, errorMsg);
+          if(stateWithError) stateWithError.pendingExchange = null;
+          return stateWithError || createErrorState(errorMsg, gameState);
      }
 
      const aiPlayer = exchangeInfo.player;
@@ -1730,10 +1651,6 @@ async function handleAIExchange(gameState: GameState | null): Promise<GameState>
     try {
         newState = logAction(newState, `AI (${aiPlayer.name}) chooses [${cardsToKeep.join(', ')}] for Exchange.`);
         const stateAfterCompletion = await completeExchange(newState, aiPlayer.id, cardsToKeep); // await completion
-         if (!stateAfterCompletion) { // Check if completeExchange returned null
-             console.error("[handleAIExchange] completeExchange returned null. Reverting.");
-             return logAction(stateBeforeExchange, "[handleAIExchange] Error completing AI exchange.");
-         }
          newState = stateAfterCompletion; // Update state
     } catch (error: any) {
          const errorMsg = `[handleAIExchange] Error during completeExchange: ${error.message}. Reverting exchange.`;
@@ -1750,18 +1667,17 @@ async function handleAIExchange(gameState: GameState | null): Promise<GameState>
 // --- Public API ---
 
 // Make this async because the actions it calls are async
-export async function performAction(gameState: GameState | null, playerId: string, action: ActionType, targetId?: string): Promise<GameState | null> { // Return GameState | null
+export async function performAction(gameState: GameState | null, playerId: string, action: ActionType, targetId?: string): Promise<GameState> {
      if (!gameState) return createErrorState(`[API performAction] Error: gameState is null for player ${playerId}.`);
     console.log(`[API performAction] Request: Player ${playerId}, Action ${action}, Target ${targetId || 'None'}`);
-    let newState = { ...gameState };
-    const stateBeforeAction = { ...gameState }; // For fallback on error
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeAction = JSON.parse(JSON.stringify(gameState)); // For fallback on error
     const player = getPlayerById(newState, playerId);
 
     // --- Input Validations ---
     if (!player) {
         const errorMsg = "[API performAction] Error: Player not found.";
-        console.error(errorMsg);
-        return logAction(newState, errorMsg); // Still returns GameState
+        return createErrorState(errorMsg, newState);
     }
     if (player.id !== newState.players[newState.currentPlayerIndex]?.id) { // Added safety check for currentPlayerIndex
          const warnMsg = `[API performAction] Warning: Not player ${playerId}'s turn (Current: ${newState.players[newState.currentPlayerIndex]?.id || 'Invalid Index'} - ${newState.players[newState.currentPlayerIndex]?.name || 'Unknown'}).`;
@@ -1842,7 +1758,7 @@ export async function performAction(gameState: GameState | null, playerId: strin
 
 
     // --- Execute Action ---
-    let stateAfterActionExecution: GameState | null = null; // Allow null for error case
+    let stateAfterActionExecution: GameState = newState; // Initialize with current state
     try {
         switch (action) {
             case 'Income':
@@ -1881,7 +1797,7 @@ export async function performAction(gameState: GameState | null, playerId: strin
          // Attempt to revert to state before action, log error
          stateAfterActionExecution = logAction(stateBeforeAction, errorMsgLog);
          // Clear potentially inconsistent partial state changes
-         if (stateAfterActionExecution) { // Check if stateAfterActionExecution is not null
+         if (stateAfterActionExecution) {
             stateAfterActionExecution.currentAction = null;
             stateAfterActionExecution.challengeOrBlockPhase = null;
             stateAfterActionExecution.pendingExchange = null;
@@ -1899,16 +1815,17 @@ export async function performAction(gameState: GameState | null, playerId: strin
      // The advanceTurn function should handle this clearing now.
      // stateAfterActionExecution.currentAction = null;
       // Ensure we always return a valid GameState
-     return stateAfterActionExecution; // Can return null if execution failed catastrophically before setting stateAfterActionExecution
+     return stateAfterActionExecution;
 }
 
 
 // Make this async because the functions it calls (resolveChallenge/Block/etc.) are async
-export async function handlePlayerResponse(gameState: GameState | null, respondingPlayerId: string, response: GameResponseType): Promise<GameState | null> { // Return GameState | null
+// Returns a valid GameState even on error.
+export async function handlePlayerResponse(gameState: GameState | null, respondingPlayerId: string, response: GameResponseType): Promise<GameState> {
      if (!gameState) return createErrorState(`[API handlePlayerResponse] Error: gameState is null for player ${respondingPlayerId}.`);
     console.log(`[API handlePlayerResponse] Request: Player ${respondingPlayerId}, Response ${response}`);
-    let newState = { ...gameState };
-    const stateBeforeResponse = { ...gameState }; // For fallback
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeResponse = JSON.parse(JSON.stringify(gameState)); // For fallback
     const phase = newState.challengeOrBlockPhase; // Use current phase state
 
      // --- Input Validations ---
@@ -1967,8 +1884,7 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
     const respondingPlayer = getPlayerById(newState, respondingPlayerId);
      if (!respondingPlayer) { // Safety check
          const errorMsg = `[API handlePlayerResponse] Error: Responding player ${respondingPlayerId} not found.`;
-         console.error(errorMsg);
-         return logAction(newState, errorMsg);
+         return createErrorState(errorMsg, newState);
      }
 
     // --- Update Phase State ---
@@ -1980,7 +1896,7 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
 
     // --- Resolve or Continue ---
-    let stateAfterResponseHandling: GameState | null = null; // Allow null for error
+    let stateAfterResponseHandling: GameState = newState; // Initialize with current state
     try {
         const currentPhase = newState.challengeOrBlockPhase!; // Use the just updated phase
 
@@ -2032,9 +1948,9 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
          }
     }
 
-    // Final Null Check
+    // Final Null Check (Although functions should now always return a state)
     if (!stateAfterResponseHandling) {
-        const finalErrorMsg = `[API handlePlayerResponse] stateAfterResponseHandling is null after processing ${response}. Reverting.`;
+        const finalErrorMsg = `[API handlePlayerResponse] stateAfterResponseHandling became null unexpectedly after processing ${response}. Reverting.`;
         console.error(finalErrorMsg);
         stateAfterResponseHandling = logAction(stateBeforeResponse, finalErrorMsg);
         if (stateAfterResponseHandling) stateAfterResponseHandling.challengeOrBlockPhase = null;
@@ -2049,19 +1965,19 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
 
 // Make this async because it calls completeExchange which is async
-export async function handleExchangeSelection(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState | null> { // Return GameState | null
+// Returns a valid GameState even on error.
+export async function handleExchangeSelection(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState> {
       if (!gameState) return createErrorState(`[API handleExchangeSelection] Error: gameState is null for player ${playerId}.`);
      console.log(`[API handleExchangeSelection] Request: Player ${playerId}, Cards ${cardsToKeep.join(', ')}`);
-    let newState = { ...gameState };
-    const stateBeforeExchange = { ...gameState }; // Fallback
+    let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+    const stateBeforeExchange = JSON.parse(JSON.stringify(gameState)); // Fallback
     const player = getPlayerById(newState, playerId);
     const exchangeInfo = newState.pendingExchange;
 
     // --- Input Validations ---
     if (!player) {
         const errorMsg = "[API handleExchangeSelection] Error: Player not found.";
-        console.error(errorMsg);
-        return logAction(newState, errorMsg);
+        return createErrorState(errorMsg, newState);
     }
     // Exchange happens *during* a player's turn, triggered by Exchange action success.
     // We don't strictly need to check currentPlayerIndex === playerIndex here,
@@ -2099,7 +2015,7 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
 
 
      console.log("[API handleExchangeSelection] Validation complete. Completing exchange...");
-     let stateAfterExchange: GameState | null = null;
+     let stateAfterExchange: GameState = newState; // Initialize
      try {
         stateAfterExchange = await completeExchange(newState, playerId, cardsToKeep);
      } catch(error: any) {
@@ -2114,27 +2030,27 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
              stateAfterExchange = logAction(stateBeforeExchange, fallbackErrorMsg); // Try logging again on fallback state
         }
      }
-     return stateAfterExchange; // Can return null if completion fails critically
+     return stateAfterExchange;
 }
 
 
 // This function should ONLY be called by the game logic internally when a reveal is mandated.
 // It's not a player action. The UI might call it *in response* to a game state flag indicating a reveal is needed.
 // Make async as it calls revealInfluence
+// Returns a valid GameState even on error.
 export async function forceRevealInfluence(gameState: GameState | null, playerId: string, cardToReveal?: CardType): Promise<GameState> {
      if (!gameState) return createErrorState(`[API forceRevealInfluence] Error: gameState is null for player ${playerId}.`);
      console.log(`[API forceRevealInfluence] Request: Player ${playerId}, Card ${cardToReveal || 'auto'}`);
-     let newState = { ...gameState };
-     const stateBeforeReveal = { ...gameState }; // Fallback
+     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
+     const stateBeforeReveal = JSON.parse(JSON.stringify(gameState)); // Fallback
      const player = getPlayerById(newState, playerId);
      if (!player) {
            const errorMsg = "[API forceRevealInfluence] Error: Player not found.";
-          console.error(errorMsg);
-          return logAction(newState, errorMsg);
+          return createErrorState(errorMsg, newState);
      }
 
      console.log(`[API forceRevealInfluence] Processing forced reveal for ${player.name}.`);
-     let revealedState: GameState | null = null;
+     let revealedState: GameState = newState;
      let revealedCard: CardType | null = null;
 
      try {
@@ -2171,3 +2087,4 @@ export async function forceRevealInfluence(gameState: GameState | null, playerId
         console.log(`[API forceRevealInfluence] Forced reveal complete for ${playerId}. Returning state.`);
      return newState;
 }
+
