@@ -23,6 +23,9 @@ export type BlockActionType =
 export type ChallengeActionType = 'Challenge'; // Contestar
 export type GameResponseType = BlockActionType | ChallengeActionType | 'Allow'; // Permitir
 
+// Decision after being challenged
+export type ChallengeDecisionType = 'Proceed' | 'Retreat';
+
 export interface InfluenceCard {
   type: CardType;
   revealed: boolean;
@@ -45,13 +48,21 @@ export interface GameState {
     player: Player;
     action: ActionType;
     target?: Player;
+    cost?: number; // Store potential cost paid upfront (e.g., Assassinate)
   } | null;
-  challengeOrBlockPhase: { // Represents the state when waiting for responses
+  challengeOrBlockPhase: { // Represents the state when waiting for responses (Challenge or Block)
     actionPlayer: Player; // The player whose claim is being challenged/blocked
     action: ActionType | BlockActionType; // The action OR block being claimed
     targetPlayer?: Player; // The target of the *original* action (relevant for blocking/challenge-block)
     possibleResponses: Player[]; // Players who can challenge or block this claim
     responses: {playerId: string, response: GameResponseType}[];
+  } | null;
+  pendingChallengeDecision: { // Represents state AFTER a challenge is made, before resolution
+      challengedPlayerId: string;
+      challengerId: string;
+      actionOrBlock: ActionType | BlockActionType; // The claim being challenged
+      originalTargetPlayerId?: string; // Store original target ID if relevant (e.g., block challenged)
+      originalActionPlayerId?: string; // Store original action player ID if relevant (e.g., block challenged)
   } | null;
   pendingExchange: {
     player: Player;
@@ -61,3 +72,4 @@ export interface GameState {
   winner: Player | null;
   needsHumanTriggerForAI: boolean; // Flag to indicate if UI should wait for human input before AI acts
 }
+

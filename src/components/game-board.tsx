@@ -1,12 +1,12 @@
 'use client';
 
-import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType } from '@/lib/game-types';
+import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType, ChallengeDecisionType } from '@/lib/game-types';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Coins, Swords, Shield, Handshake, Skull, Replace, HandCoins, CircleDollarSign, HelpCircle, Ban, Check } from 'lucide-react';
+import { Coins, Swords, Shield, Handshake, Skull, Replace, HandCoins, CircleDollarSign, HelpCircle, Ban, Check, ShieldAlert, ShieldCheck } from 'lucide-react'; // Added ShieldAlert, ShieldCheck
 import React, { useState, useEffect } from 'react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -18,7 +18,8 @@ interface GameBoardProps {
   onAction: (action: ActionType, targetId?: string) => void;
   onResponse: (response: GameResponseType) => void;
   onExchange: (cardsToKeep: CardType[]) => void;
-  onForceReveal: (cardToReveal?: CardType) => void; // Add this prop
+  onForceReveal: (cardToReveal: CardType) => void; // Needs card type
+  onChallengeDecision: (decision: ChallengeDecisionType) => void; // Add this prop
 }
 
 // Mapping Card Types to Icons and Colors (adjust colors as needed)
@@ -109,8 +110,9 @@ const ActionButtons: React.FC<{
     const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId;
     const mustCoup = (humanPlayer?.money ?? 0) >= 10;
 
-    if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.winner) {
-        return null; // Don't show buttons if not human's turn, or waiting for response/exchange/game over
+    // Don't show buttons if not human's turn, or waiting for response/exchange/decision/game over
+    if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.pendingChallengeDecision || gameState.winner) {
+        return null;
     }
 
     const possibleActions: ActionType[] = ['Income', 'Foreign Aid'];
@@ -223,44 +225,44 @@ const ResponsePrompt: React.FC<{
     onResponse: (response: GameResponseType) => void;
 }> = ({ gameState, humanPlayerId, onResponse }) => {
     const phase = gameState.challengeOrBlockPhase;
+    // Check if it's the response phase AND it's for the human player AND they haven't responded yet
     if (!phase || !phase.possibleResponses.some(p => p.id === humanPlayerId) || phase.responses.some(r => r.playerId === humanPlayerId)) {
-        return null; // Not in response phase for human, or human already responded
+        return null;
     }
 
-    const actionPlayer = phase.actionPlayer;
-    const action = phase.action;
-    const targetPlayer = phase.targetPlayer; // Could be undefined (e.g., Foreign Aid)
-
-    const canChallengeAction = action !== 'Income' && action !== 'Coup' && !action.startsWith('Block '); // Check if the original action can be challenged
-    const canBlockAction =
-        (action === 'Foreign Aid') || // Anyone can claim Duke
-        (action === 'Steal' && targetPlayer?.id === humanPlayerId) || // Target can claim Captain/Ambassador
-        (action === 'Assassinate' && targetPlayer?.id === humanPlayerId); // Target can claim Contessa
-
-     const canChallengeBlock = action.startsWith('Block ') && phase.possibleResponses.some(p => p.id === humanPlayerId) // You are the one who can challenge the block
-
-
-    let promptText = `${actionPlayer.name} is attempting to perform ${action}`;
-    if (targetPlayer) {
-        promptText += ` targeting ${targetPlayer.id === humanPlayerId ? 'You' : targetPlayer.name}.`;
-    } else if (action === 'Foreign Aid') {
-        promptText += '.';
-    } else if (action.startsWith('Block ')) {
-         // Adjust prompt for challenging a block
-         const blockerName = actionPlayer.name; // The 'actionPlayer' in this context is the blocker
-         const originalAction = phase.targetPlayer?.name || 'Unknown'; // The 'targetPlayer' here is the original action taker
-         promptText = `${blockerName} is attempting to block ${originalAction}'s action. Do you want to challenge their block?`;
-         // Reset flags for block/challenge action buttons below
-         // canChallengeAction = false; // Cannot challenge the original action anymore
-         // canBlockAction = false; // Cannot block the original action anymore
+    // Also check if there's a pending challenge decision, if so, don't show this prompt
+    if (gameState.pendingChallengeDecision) {
+        return null;
     }
 
-    let blockType: GameResponseType | null = null;
-    if (canBlockAction) {
-        if (action === 'Foreign Aid') blockType = 'Block Foreign Aid';
-        else if (action === 'Steal') blockType = 'Block Stealing';
-        else if (action === 'Assassinate') blockType = 'Block Assassination';
-    }
+    const actionPlayer = phase.actionPlayer; // Player making the claim
+    const actionOrBlock = phase.action; // The claim being made (action or block)
+    const targetPlayer = phase.targetPlayer; // Original action target (if block)
+
+    // Determine if the current claim is blockable by the human
+    const originalActionType = actionOrBlock.startsWith('Block ') ? null : (actionOrBlock as ActionType);
+    const blockTypeForOriginalAction = originalActionType ? getBlockTypeForAction(originalActionType) : null;
+    const canBlockAction = blockTypeForOriginalAction &&
+                           (originalActionType === 'Foreign Aid' || targetPlayer?.id === humanPlayerId);
+
+    // Determine if the current claim is challengeable
+    const canChallengeClaim = getCardForAction(actionOrBlock) !== null;
+
+    let promptText = `${actionPlayer.name} claims ${actionOrBlock}`;
+     if (actionOrBlock === 'Assassinate' || actionOrBlock === 'Steal' || actionOrBlock === 'Coup') {
+        if (targetPlayer) {
+             promptText += ` targeting ${targetPlayer.id === humanPlayerId ? 'You' : targetPlayer.name}.`;
+        }
+     } else if (actionOrBlock.startsWith('Block ')) {
+          // The 'actionPlayer' is the blocker, 'targetPlayer' is the original action taker
+          const blockerName = actionPlayer.name;
+          const originalActionTaker = targetPlayer?.name || 'Unknown';
+          const originalAction = getActionFromBlock(actionOrBlock as BlockActionType);
+          promptText = `${blockerName} claims to block ${originalActionTaker}'s ${originalAction}.`;
+     } else {
+         promptText += '.';
+     }
+     promptText += " What do you do?";
 
 
     return (
@@ -273,22 +275,14 @@ const ResponsePrompt: React.FC<{
                 <Button onClick={() => onResponse('Allow')} variant="secondary">
                     <Check className="w-4 h-4 mr-1" /> Allow
                 </Button>
-                {/* Show Challenge Action button only if the original action is challengeable */}
-                {canChallengeAction && !action.startsWith('Block ') && (
+                {canChallengeClaim && (
                     <Button onClick={() => onResponse('Challenge')} variant="destructive">
-                        <HelpCircle className="w-4 h-4 mr-1" /> Challenge Action
+                        <HelpCircle className="w-4 h-4 mr-1" /> Challenge Claim
                     </Button>
                 )}
-                 {/* Show Challenge Block button only if a block is being challenged */}
-                 {canChallengeBlock && action.startsWith('Block ') && (
-                    <Button onClick={() => onResponse('Challenge')} variant="destructive">
-                        <HelpCircle className="w-4 h-4 mr-1" /> Challenge Block
-                    </Button>
-                 )}
-                 {/* Show Block button only if the original action is blockable by human */}
-                {blockType && canBlockAction && !action.startsWith('Block ') && (
-                    <Button onClick={() => onResponse(blockType)} variant="outline">
-                        <Ban className="w-4 h-4 mr-1" /> {blockType}
+                {canBlockAction && blockTypeForOriginalAction && (
+                    <Button onClick={() => onResponse(blockTypeForOriginalAction)} variant="outline">
+                        <Ban className="w-4 h-4 mr-1" /> {blockTypeForOriginalAction}
                     </Button>
                 )}
             </CardContent>
@@ -314,11 +308,13 @@ const ExchangePrompt: React.FC<{
 
     const handleCardToggle = (card: CardType) => {
         setSelectedCards(prev => {
-            const index = prev.indexOf(card);
-            if (index > -1) {
-                // Deselect
-                return prev.filter(c => c !== card);
-            } else if (prev.length < currentInfluenceCount) {
+            const cardIndex = prev.findIndex(c => c === card); // Find first instance
+             if (cardIndex > -1) {
+                 // Deselect: remove only the first instance found
+                 const newSelection = [...prev];
+                 newSelection.splice(cardIndex, 1);
+                 return newSelection;
+             } else if (prev.length < currentInfluenceCount) {
                 // Select if not exceeding limit
                 return [...prev, card];
             }
@@ -336,16 +332,27 @@ const ExchangePrompt: React.FC<{
             </CardHeader>
             <CardContent>
                 <div className="flex flex-wrap gap-2 justify-center mb-4">
-                    {cardsToChooseFrom.map((card, index) => (
-                         <Button
-                            key={`${card}-${index}`} // Handle duplicate card types
-                            variant={selectedCards.includes(card) ? 'default' : 'outline'}
-                            onClick={() => handleCardToggle(card)}
-                            className="flex items-center gap-1"
-                          >
-                             {cardInfo[card].icon} {card}
-                          </Button>
-                    ))}
+                    {cardsToChooseFrom.map((card, index) => {
+                         // Count how many times this card type is already selected
+                        const countSelected = selectedCards.filter(c => c === card).length;
+                        // Count how many times this card type is available in total
+                        const countAvailable = cardsToChooseFrom.filter(c => c === card).length;
+                         // Determine if *this specific instance* of the card is selected
+                         // This requires a more complex check or state structure if we need to differentiate identical cards visually
+                         // For simplicity, we'll base 'selected' state on inclusion in the array
+                         const isSelected = selectedCards.includes(card); // This might highlight all cards of the same type
+
+                         return (
+                             <Button
+                                key={`${card}-${index}`} // Use index for unique key
+                                variant={isSelected ? 'default' : 'outline'}
+                                onClick={() => handleCardToggle(card)}
+                                className="flex items-center gap-1"
+                              >
+                                 {cardInfo[card].icon} {card}
+                              </Button>
+                         );
+                    })}
                 </div>
                  <Button onClick={() => onExchange(selectedCards)} disabled={!canConfirm} className="w-full">
                      Confirm Selection
@@ -359,30 +366,45 @@ const ExchangePrompt: React.FC<{
 const ForcedRevealPrompt: React.FC<{
     gameState: GameState;
     humanPlayerId: string;
-    onForceReveal: (cardToReveal?: CardType) => void;
+    onForceReveal: (cardToReveal: CardType) => void; // Needs card type
 }> = ({ gameState, humanPlayerId, onForceReveal }) => {
-     // Check if the human player needs to reveal an influence
-     // This logic needs refinement. How do we signal *which* action caused the reveal?
-     // For now, let's assume if it's human's turn AND they have revealed cards < total cards,
-     // AND the log indicates they lost a challenge or were targeted, they might need to reveal.
-     // THIS IS A HACKY WAY - Game logic should ideally have a specific state for this.
-     const player = gameState.players.find(p => p.id === humanPlayerId);
-     const needsToReveal = player && player.influence.some(c => !c.revealed) && player.influence.some(c => c.revealed) && player.influence.length > player.influence.filter(c => c.revealed).length; // Simplified check: Has both revealed and unrevealed cards
+    // Determine if human player needs to reveal based on game logic flags (more robust)
+    // This requires game logic to set a specific flag, e.g., `playerNeedsToReveal: playerId`
+    // For now, we'll keep the simplified/less reliable log check as placeholder
+    const player = gameState.players.find(p => p.id === humanPlayerId);
+    const needsToReveal = player && player.influence.some(c => !c.revealed); // Player must have cards
 
-     // More robust check: Look at the log for specific triggers affecting the human player.
+    // Example of how a dedicated flag would work:
+    // const needsToReveal = gameState.playerNeedsToReveal === humanPlayerId;
+
+    // Placeholder log check (less reliable):
      const lastLog = gameState.actionLog[gameState.actionLog.length - 1] || "";
-     const requiresHumanReveal = player && player.influence.some(c => !c.revealed) &&
+     const requiresHumanRevealBasedOnLog = player && player.influence.some(c => !c.revealed) &&
                                  (lastLog.includes(`${player.name} loses the challenge and must reveal influence`) ||
                                   lastLog.includes(`${player.name} loses the block challenge and must reveal influence`) ||
-                                  lastLog.includes(`performs a Coup against ${player.name}`) ||
-                                  lastLog.includes(`Assassination against ${player.name} succeeds`));
+                                  lastLog.includes(`performs a Coup against ${player.name}`) || // Coup forces reveal *before* log usually
+                                  lastLog.includes(`Assassination against ${player.name} succeeds`)); // Assassination forces reveal *before* log usually
+                                  // We need a better flag in game state!
 
-
-    if (!requiresHumanReveal) {
-        return null;
-    }
+    // Combine checks (replace with proper flag check when implemented)
+     if (!player || !requiresHumanRevealBasedOnLog) {
+         return null;
+     }
 
     const unrevealedCards = player.influence.filter(c => !c.revealed);
+
+    // If only one card left, it should be revealed automatically by game logic usually.
+    // This prompt is mainly for choosing *which* card when multiple are available.
+    if (unrevealedCards.length <= 1) {
+        // Game logic should handle auto-reveal for the last card.
+        // If it gets here with 1 card, maybe call onForceReveal automatically?
+        // useEffect(() => {
+        //    if (unrevealedCards.length === 1) {
+        //       onForceReveal(unrevealedCards[0].type);
+        //    }
+        // }, [unrevealedCards, onForceReveal]);
+        return null; // Hide prompt if only 0 or 1 card left
+    }
 
     return (
         <Card className="mt-4 border-destructive border-2 shadow-lg">
@@ -396,29 +418,62 @@ const ForcedRevealPrompt: React.FC<{
                         {cardInfo[card.type].icon} Reveal {card.type}
                     </Button>
                 ))}
-                 {/* Add a button to reveal random if only one card left? */}
-                 {unrevealedCards.length === 1 && (
-                     <Button onClick={() => onForceReveal(unrevealedCards[0].type)} variant="destructive" className="flex items-center gap-1">
-                       {cardInfo[unrevealedCards[0].type].icon} Reveal {unrevealedCards[0].type}
-                     </Button>
-                 )}
+            </CardContent>
+        </Card>
+    );
+};
+
+// New component for the challenge decision phase
+const ChallengeDecisionPrompt: React.FC<{
+    gameState: GameState;
+    humanPlayerId: string;
+    onChallengeDecision: (decision: ChallengeDecisionType) => void;
+}> = ({ gameState, humanPlayerId, onChallengeDecision }) => {
+    const decisionPhase = gameState.pendingChallengeDecision;
+
+    // Show only if it's the human player's turn to decide
+    if (!decisionPhase || decisionPhase.challengedPlayerId !== humanPlayerId) {
+        return null;
+    }
+
+    const challenger = gameState.players.find(p => p.id === decisionPhase.challengerId);
+    const actionOrBlock = decisionPhase.actionOrBlock;
+
+    if (!challenger) return null; // Safety check
+
+    return (
+        <Card className="mt-4 border-yellow-500 border-2 shadow-lg">
+            <CardHeader>
+                <CardTitle>Challenge Decision!</CardTitle>
+                <CardDescription>
+                    {challenger.name} has challenged your claim of {actionOrBlock}.
+                    Do you want to proceed (reveal card or lose influence if bluffing) or retreat (cancel the action/block)?
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="flex gap-2 justify-center">
+                <Button onClick={() => onChallengeDecision('Proceed')} variant="default">
+                    <ShieldCheck className="w-4 h-4 mr-1" /> Proceed
+                </Button>
+                <Button onClick={() => onChallengeDecision('Retreat')} variant="outline">
+                    <ShieldAlert className="w-4 h-4 mr-1" /> Retreat
+                </Button>
             </CardContent>
         </Card>
     );
 };
 
 
-
-export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal }) => {
+export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal, onChallengeDecision }) => {
     const humanPlayer = gameState.players.find(p => p.id === humanPlayerId);
     const otherPlayers = gameState.players.filter(p => p.id !== humanPlayerId);
 
-    // Determine if the human player *needs* to act (take turn, respond, exchange, reveal)
-    const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.winner;
+    // Determine if the human player *needs* to act
+    const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.winner;
     const isHumanResponding = gameState.challengeOrBlockPhase?.possibleResponses.some(p => p.id === humanPlayerId) && !gameState.challengeOrBlockPhase?.responses.some(r => r.playerId === humanPlayerId);
     const isHumanExchanging = gameState.pendingExchange?.player.id === humanPlayerId;
-     // This check for forced reveal needs improvement based on game state logic
-    const isHumanForcedToReveal = false; // Replace with actual logic based on gamestate flag if possible
+    const isHumanDecidingChallenge = gameState.pendingChallengeDecision?.challengedPlayerId === humanPlayerId;
+    // Placeholder for forced reveal trigger
+     const isHumanForcedToReveal = false; // Replace with actual flag check later
 
 
     return (
@@ -459,10 +514,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
             <div className="mt-6">
                 {isHumanTurn && <ActionButtons gameState={gameState} humanPlayerId={humanPlayerId} onAction={onAction} />}
                 {isHumanResponding && <ResponsePrompt gameState={gameState} humanPlayerId={humanPlayerId} onResponse={onResponse} />}
+                 {isHumanDecidingChallenge && <ChallengeDecisionPrompt gameState={gameState} humanPlayerId={humanPlayerId} onChallengeDecision={onChallengeDecision} />}
                 {isHumanExchanging && <ExchangePrompt gameState={gameState} humanPlayerId={humanPlayerId} onExchange={onExchange} />}
-                {/* Add ForcedRevealPrompt here - Need better logic trigger */}
-                {/* <ForcedRevealPrompt gameState={gameState} humanPlayerId={humanPlayerId} onForceReveal={onForceReveal} /> */}
+                {/* Add ForcedRevealPrompt here - Needs better logic trigger */}
+                 {/* <ForcedRevealPrompt gameState={gameState} humanPlayerId={humanPlayerId} onForceReveal={onForceReveal} /> */}
             </div>
         </div>
     );
 };
+
