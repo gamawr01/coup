@@ -20,16 +20,17 @@ export type BlockActionType =
     | 'Block Assassination';    // Bloqueia Assassinato (Contessa)
 
 export type ChallengeActionType = 'Challenge'; // Contestar
+// Allow, or a specific Block, or Challenge
 export type GameResponseType = BlockActionType | ChallengeActionType | 'Allow'; // Permitir
 
 // Decision after being challenged
 export type ChallengeDecisionType = 'Proceed' | 'Retreat';
 
-// Stages for multi-step interactions (like Assassination)
+// Stages for multi-step interactions (like Assassination or Steal)
 export type InteractionStage =
-  | 'challenge_action' // Initial phase: Can challenge the action claim
-  | 'block_decision'   // Target decides: Block the action or allow it
-  | 'challenge_block'; // Phase: Can challenge the block claim
+  | 'challenge_action' // Initial phase: Can challenge the action claim (e.g., claiming Assassin, Captain)
+  | 'block_decision'   // Target decides: Block the action or allow it (e.g., claim Contessa vs Assassinate, claim Captain/Ambassador vs Steal)
+  | 'challenge_block'; // Phase: Can challenge the block claim (e.g., challenge Contessa, Captain, Ambassador)
 
 export interface InfluenceCard {
   type: CardType;
@@ -71,12 +72,26 @@ export interface GameState {
       originalTargetPlayerId?: string; // Store original target ID if relevant (e.g., block challenged)
       originalActionPlayerId?: string; // Store original action player ID if relevant (e.g., block challenged)
   } | null;
+   pendingAssassinationConfirmation: { // Represents state AFTER Contessa is claimed to block Assassination
+     assassinPlayerId: string;
+     contessaPlayerId: string;
+   } | null;
   pendingExchange: {
     player: Player;
     cardsToChoose: CardType[];
   } | null;
+   playerNeedsToReveal: string | null; // ID of the player who must reveal an influence
+   pendingActionAfterReveal: { // Stores context to resume an action after a reveal
+     type: 'action_proceeds' | 'block_succeeds' | 'block_fails_action_proceeds' | 'action_fails_turn_advances';
+     claimerId?: string; // The ID of the player whose original action/block should proceed/succeed
+     actionOrBlock?: ActionType | BlockActionType; // The action/block that should proceed/succeed
+     originalTargetId?: string; // Target of the original action
+     originalActionPlayerId?: string; // Player who took the original action (if a block succeeded/failed)
+     loserId?: string; // Player who lost influence during the challenge/reveal
+     originalAction?: ActionType | null; // Original action if a block failed challenge
+     failedClaim?: ActionType | BlockActionType; // The specific claim that failed due to bluff
+   } | null;
   actionLog: string[];
   winner: Player | null;
   needsHumanTriggerForAI: boolean; // Flag to indicate if UI should wait for human input before AI acts
 }
-

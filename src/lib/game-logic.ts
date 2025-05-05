@@ -171,7 +171,6 @@ function getNextPlayerIndex(currentIndex: number, players: Player[] | undefined)
 }
 
 
-
 // Helper function to safely create a GameState object with an error message
 // Ensures it *always* returns a valid GameState object.
 function createErrorState(errorMessage: string, previousState?: GameState | null): GameState {
@@ -641,41 +640,40 @@ async function performSteal(gameState: GameState | null, playerId: string, targe
      // Store cost in currentAction - Use the *updated* player state
      newState.currentAction = { player: player, action: 'Steal', target: target, cost: 0 };
 
-    const potentialResponders = getActivePlayers(newState).filter(p => p.id !== playerId);
+    const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
 
 
-    if (potentialResponders.length > 0) {
-         console.log(`[performSteal] Potential responders exist. Entering challenge/block phase.`);
+    if (potentialChallengers.length > 0) {
+         console.log(`[performSteal] Potential challengers exist. Entering challenge_action phase.`);
+         // Stage 1: Challenge the Captain claim
          newState.challengeOrBlockPhase = {
-            actionPlayer: player,
+            actionPlayer: player, // Player claiming Captain
             action: 'Steal',
             targetPlayer: target,
-            possibleResponses: potentialResponders, // Includes the target who can block, others can challenge
+            possibleResponses: potentialChallengers, // Anyone can challenge the Captain claim
             responses: [],
-            stage: 'challenge_action', // Default stage: challenge or block
-            validResponses: ['Challenge', 'Allow', 'Block Stealing'],
+            stage: 'challenge_action',
+            validResponses: ['Challenge', 'Allow'], // Only challenge or allow the Captain claim initially
         };
          const stateAfterTrigger = await triggerAIResponses(newState);
          newState = stateAfterTrigger;
 
     } else {
-        // No one can challenge or block, steal succeeds
-         console.log(`[performSteal] No responders. Steal succeeds.`);
-        const amount = Math.min(2, target.money);
-         const playerIndex = newState.players.findIndex(p => p.id === playerId);
-         const targetIndex = newState.players.findIndex(p => p.id === targetId);
-         // Check indexes again in case state changed
-         if (playerIndex !== -1 && targetIndex !== -1) {
-            const playerNewMoney = newState.players[playerIndex].money + amount;
-            const targetNewMoney = newState.players[targetIndex].money - amount;
-            newState.players[playerIndex] = { ...newState.players[playerIndex], money: playerNewMoney };
-            newState.players[targetIndex] = { ...newState.players[targetIndex], money: targetNewMoney };
-            newState = logAction(newState, `${player.name} successfully Steals ${amount} coins from ${target.name}. ${player.name} now has ${playerNewMoney}, ${target.name} now has ${targetNewMoney}.`);
-         } else {
-              console.error(`[performSteal] Player or target index became invalid after potential state changes. PlayerIndex: ${playerIndex}, TargetIndex: ${targetIndex}`);
-              newState = logAction(newState, "[performSteal] Error processing steal after no responders.");
-         }
-        newState = await advanceTurn(newState);
+        // No one can challenge the Captain claim
+         console.log(`[performSteal] No challengers for Captain claim. Proceeding to block_decision stage.`);
+         // Immediately transition to the block decision stage
+         newState.challengeOrBlockPhase = {
+             actionPlayer: player, // Original action player
+             action: 'Steal', // Original action
+             targetPlayer: target, // Target of steal
+             possibleResponses: [target], // Only the target can block
+             responses: [],
+             stage: 'block_decision',
+             validResponses: ['Block Stealing', 'Allow'], // Target can claim Captain/Ambassador to block or allow
+         };
+         newState = logAction(newState, `No one challenged the Steal claim. ${target.name}, do you block with Captain/Ambassador or allow?`);
+          const stateAfterTrigger = await triggerAIResponses(newState); // Trigger AI block decision if target is AI
+          newState = stateAfterTrigger;
     }
      return newState;
 }
@@ -961,41 +959,58 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
                   newState = await triggerAIResponses(newState);
             }
 
-    } else if (stage === 'block_decision' && blocks.length > 0) {
-        // --- Handle Block (during block_decision stage for Assassination) ---
-        // Target (Contessa claimer) chose to block
+    } else if ((stage === 'block_decision') && blocks.length > 0) { // Only block decision stage
+        // --- Handle Block (during block_decision stage for Assassination/Steal) ---
+        // Target (claimer) chose to block
          const blockerId = blocks[0].playerId; // Should be the target
-         const blockType = blocks[0].response as BlockActionType; // Should be Block Assassination
-         console.log(`[resolveChallengeOrBlock] Target ${blockerId} chose to ${blockType}. Setting up Assassination Confirmation Phase.`);
-         const originalActionPlayer = newState.currentAction?.player; // Assassin
-         const blocker = getPlayerById(newState, blockerId); // Target/Contessa claimer
+         const blockType = blocks[0].response as BlockActionType; // Should be Block Assassination or Block Stealing
+         console.log(`[resolveChallengeOrBlock] Target ${blockerId} chose to ${blockType}. Setting up challenge_block stage or confirmation.`);
+         const originalActionPlayer = newState.currentAction?.player; // Original action taker (Assassin or Stealer)
+         const blocker = getPlayerById(newState, blockerId); // Target/Blocker
 
          if (!originalActionPlayer || !blocker) {
-             const errorMsg = `[resolveChallengeOrBlock] Error: Cannot find Assassin or Blocker context when handling Contessa block.`;
+             const errorMsg = `[resolveChallengeOrBlock] Error: Cannot find original player or Blocker context when handling target's block claim.`;
              return createErrorState(errorMsg, newState);
          }
 
-         // Instead of challenge_block, enter pendingAssassinationConfirmation
-         newState.pendingAssassinationConfirmation = {
-             assassinPlayerId: originalActionPlayer.id,
-             contessaPlayerId: blocker.id,
-         };
-         newState = logAction(newState, `${blocker.name} claims Contessa to block the assassination! ${originalActionPlayer.name}, do you challenge the Contessa claim or accept the block?`);
+         // Special Handling for Assassination Block
+         if (blockType === 'Block Assassination') {
+             console.log(`[resolveChallengeOrBlock] Contessa block claimed. Entering confirmation phase.`);
+             // Instead of challenge_block, enter pendingAssassinationConfirmation
+             newState.pendingAssassinationConfirmation = {
+                 assassinPlayerId: originalActionPlayer.id,
+                 contessaPlayerId: blocker.id,
+             };
+             newState = logAction(newState, `${blocker.name} claims Contessa to block the assassination! ${originalActionPlayer.name}, do you challenge the Contessa claim or accept the block?`);
 
-         // Trigger AI decision if Assassin is AI
-         if (originalActionPlayer.isAI) {
-             console.log(`[resolveChallengeOrBlock] Triggering AI assassination confirmation for ${originalActionPlayer.name}.`);
-             newState = await handleAIAssassinationConfirmation(newState);
-         } else {
-             console.log(`[resolveChallengeOrBlock] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
+             // Trigger AI decision if Assassin is AI
+             if (originalActionPlayer.isAI) {
+                 console.log(`[resolveChallengeOrBlock] Triggering AI assassination confirmation for ${originalActionPlayer.name}.`);
+                 newState = await handleAIAssassinationConfirmation(newState);
+             } else {
+                 console.log(`[resolveChallengeOrBlock] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
+             }
+             // Return state, waiting for handleAssassinationConfirmation call
+             if (!newState || typeof newState.players === 'undefined') {
+                 console.error("[resolveChallengeOrBlock] Error: newState became invalid after setting up assassination confirmation. Reverting.");
+                 return createErrorState("[resolveChallengeOrBlock] Internal error after setting up assassination confirmation.", stateBeforeResolve);
+             }
+             return newState; // Return state waiting for confirmation
+         } else { // Handle Steal Block (and potentially others if added)
+             // Standard block handling: Go to challenge_block stage
+              console.log(`[resolveChallengeOrBlock] Target ${blocker.name} claims ${blockType}. Setting up challenge_block stage.`);
+              newState.challengeOrBlockPhase = {
+                  actionPlayer: blocker, // Blocker is now making the claim
+                  action: blockType, // The claim is the block
+                  targetPlayer: originalActionPlayer, // Target of challenge is original action player
+                  possibleResponses: getActivePlayers(newState).filter(p => p.id !== blockerId), // Anyone else can challenge
+                  responses: [],
+                  stage: 'challenge_block',
+                  validResponses: ['Challenge', 'Allow'],
+              };
+               newState = logAction(newState, `${blocker.name} claims to ${blockType}. Others can challenge this claim.`);
+               newState = await triggerAIResponses(newState); // Trigger challenges against the block
          }
-         // Return state, waiting for handleAssassinationConfirmation call
-          // Ensure we return a valid state
-        if (!newState || typeof newState.players === 'undefined') {
-             console.error("[resolveChallengeOrBlock] Error: newState became invalid after setting up assassination confirmation. Reverting.");
-             return createErrorState("[resolveChallengeOrBlock] Internal error after setting up assassination confirmation.", stateBeforeResolve);
-        }
-        return newState; // Return state waiting for confirmation
 
     } else if (allows.length === phase.possibleResponses.length || phase.possibleResponses.length === 0 ) {
         // --- Handle All Allows / No Responses Possible ---
@@ -1017,22 +1032,22 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
         } else {
              // An action claim was allowed (not challenged or blocked).
              newState = logAction(newState, `No challenges or blocks. ${currentClaimer.name}'s ${actionOrBlock} attempt succeeds.`);
-             // For Assassination, this means the claim passed, now check block
-             if (actionOrBlock === 'Assassinate' && originalTarget) {
-                  console.log(`[resolveChallengeOrBlock] Assassinate claim successful. Proceeding to block_decision stage.`);
+             // For Assassination/Steal, this means the claim passed, now check block
+             if ((actionOrBlock === 'Assassinate' || actionOrBlock === 'Steal') && originalTarget) {
+                  console.log(`[resolveChallengeOrBlock] ${actionOrBlock} claim successful. Proceeding to block_decision stage.`);
                    newState.challengeOrBlockPhase = {
                       actionPlayer: currentClaimer, // Original action player
-                      action: 'Assassinate', // Original action
+                      action: actionOrBlock as ActionType, // Original action
                       targetPlayer: originalTarget, // Target
                       possibleResponses: [originalTarget], // Only target can block
                       responses: [],
                       stage: 'block_decision',
-                      validResponses: ['Block Assassination', 'Allow'],
+                      validResponses: actionOrBlock === 'Assassinate' ? ['Block Assassination', 'Allow'] : ['Block Stealing', 'Allow'],
                   };
-                   newState = logAction(newState, `${originalTarget.name}, do you block with Contessa or allow the Assassination?`);
+                   newState = logAction(newState, `${originalTarget.name}, do you block ${actionOrBlock} with ${actionOrBlock === 'Assassinate' ? 'Contessa' : 'Captain/Ambassador'} or allow?`);
                    newState = await triggerAIResponses(newState);
               } else {
-                   // Execute other successful actions
+                   // Execute other successful actions (Tax, Foreign Aid, Exchange)
                    newState = await executeSuccessfulAction(newState, currentClaimer, actionOrBlock as ActionType, originalTarget);
               }
         }
@@ -1112,14 +1127,10 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
             if (originalAction && originalActionPlayer) {
                  console.log(`[handleChallengeDecision] Block retreated. Original action ${originalAction} by ${originalActionPlayer.name} proceeds.`);
                  newState = logAction(newState, `${challengedPlayer.name}'s block fails due to retreat. ${originalActionPlayer.name}'s ${originalAction} proceeds.`);
-                 // For Assassination, if block fails, execute the assassination
-                 if (originalAction === 'Assassinate' && originalTargetPlayer) {
-                     newState = logAction(newState, `Assassination against ${originalTargetPlayer.name} proceeds.`);
-                     newState = await setPlayerNeedsToReveal(newState, originalTargetPlayer.id); // Await reveal handling
-                      // Turn advances after target reveal
-                 } else {
-                      newState = await executeSuccessfulAction(newState, originalActionPlayer, originalAction, originalTargetPlayer);
-                 }
+                 // Special handling: If the *block* fails, the *action* succeeds now.
+                 // This requires calling executeSuccessfulAction for the original action.
+                 newState = await executeSuccessfulAction(newState, originalActionPlayer, originalAction, originalTargetPlayer);
+
             } else {
                  const errorMsg = `[handleChallengeDecision] Error: Could not resolve original action after block retreat.`;
                  newState = logAction(newState, errorMsg);
@@ -1185,22 +1196,23 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
                 newState = await advanceTurn(newState);
           } else { // Invalid challenge on an action
                newState = logAction(newState, `Invalid challenge on action ${actionOrBlock}. Action by ${challengedPlayer.name} proceeds.`);
-               // Check for assassination block stage
-               if (actionOrBlock === 'Assassinate' && originalTarget) {
-                    console.log(`[executeChallengeResolution] Invalid challenge on Assassinate. Proceeding to block_decision stage.`);
+                // Check for block stage for actions like Assassinate/Steal
+               if ((actionOrBlock === 'Assassinate' || actionOrBlock === 'Steal') && originalTarget) {
+                    console.log(`[executeChallengeResolution] Invalid challenge on ${actionOrBlock}. Proceeding to block_decision stage.`);
                     newState.challengeOrBlockPhase = {
                         actionPlayer: challengedPlayer, // Original action player
-                        action: 'Assassinate', // Original action
+                        action: actionOrBlock as ActionType, // Original action
                         targetPlayer: originalTarget, // Target
                         possibleResponses: [originalTarget], // Only target can block
                         responses: [],
                         stage: 'block_decision',
-                        validResponses: ['Block Assassination', 'Allow'],
+                        validResponses: actionOrBlock === 'Assassinate' ? ['Block Assassination', 'Allow'] : ['Block Stealing', 'Allow'],
                     };
-                    newState = logAction(newState, `${originalTarget.name}, do you block with Contessa or allow the Assassination?`);
+                    newState = logAction(newState, `${originalTarget.name}, do you block ${actionOrBlock} with ${actionOrBlock === 'Assassinate' ? 'Contessa' : 'Captain/Ambassador'} or allow?`);
                     newState = await triggerAIResponses(newState);
                } else {
-                   newState = await executeSuccessfulAction(newState, challengedPlayer, actionOrBlock as ActionType, originalTarget);
+                    // Execute other actions directly
+                    newState = await executeSuccessfulAction(newState, challengedPlayer, actionOrBlock as ActionType, originalTarget);
                }
           }
            if (!newState || typeof newState.players === 'undefined') { // Safety check after handling invalid challenge
@@ -1365,21 +1377,21 @@ export async function processPendingActionAfterReveal(gameState: GameState): Pro
              if (claimer) {
                  console.log(`[processPendingActionAfterReveal] Reveal complete. Original action ${pendingAction.actionOrBlock} by ${claimer.name} proceeds.`);
                  newState = logAction(newState, `Challenge failed. ${claimer.name}'s ${pendingAction.actionOrBlock} proceeds.`);
-                 if (pendingAction.actionOrBlock === 'Assassinate' && originalTarget) {
-                      console.log(`[processPendingActionAfterReveal] Assassinate claim proceeding to block decision stage.`);
+                 if ((pendingAction.actionOrBlock === 'Assassinate' || pendingAction.actionOrBlock === 'Steal') && originalTarget) {
+                      console.log(`[processPendingActionAfterReveal] ${pendingAction.actionOrBlock} claim proceeding to block decision stage.`);
                      newState.challengeOrBlockPhase = {
                          actionPlayer: claimer,
-                         action: 'Assassinate',
+                         action: pendingAction.actionOrBlock as ActionType,
                          targetPlayer: originalTarget,
                          possibleResponses: [originalTarget],
                          responses: [],
                          stage: 'block_decision',
-                         validResponses: ['Block Assassination', 'Allow'],
+                         validResponses: pendingAction.actionOrBlock === 'Assassinate' ? ['Block Assassination', 'Allow'] : ['Block Stealing', 'Allow'],
                      };
-                     newState = logAction(newState, `${originalTarget.name}, do you block with Contessa or allow the Assassination?`);
+                     newState = logAction(newState, `${originalTarget.name}, do you block ${pendingAction.actionOrBlock} with ${pendingAction.actionOrBlock === 'Assassinate' ? 'Contessa' : 'Captain/Ambassador'} or allow?`);
                      newState = await triggerAIResponses(newState);
                  } else {
-                     // For Tax and other actions, execute them now.
+                     // For Tax, Exchange, Foreign Aid actions, execute them now.
                      newState = await executeSuccessfulAction(newState, claimer, pendingAction.actionOrBlock as ActionType, originalTarget);
                  }
              } else {
@@ -1411,13 +1423,9 @@ export async function processPendingActionAfterReveal(gameState: GameState): Pro
              if (pendingAction.originalAction && originalActionPlayer && failedBlocker) {
                  console.log(`[processPendingActionAfterReveal] Bluffer (${failedBlocker.name}) reveal complete. Original action ${pendingAction.originalAction} by ${originalActionPlayer.name} proceeds.`);
                   newState = logAction(newState, `${failedBlocker.name}'s block fails. ${originalActionPlayer.name}'s ${pendingAction.originalAction} proceeds.`);
-                 if (pendingAction.originalAction === 'Assassinate' && originalTarget) {
-                     newState = logAction(newState, `Assassination against ${originalTarget.name} proceeds.`);
-                     newState = await setPlayerNeedsToReveal(newState, originalTarget.id); // Await reveal handling
-                      // Turn advances after target reveal
-                 } else {
-                     newState = await executeSuccessfulAction(newState, originalActionPlayer, pendingAction.originalAction, originalTarget);
-                 }
+                 // Action succeeds automatically because block failed
+                 newState = await executeSuccessfulAction(newState, originalActionPlayer, pendingAction.originalAction, originalTarget);
+
              } else {
                   const errorMsg = `[processPendingActionAfterReveal] Error retrieving original action/player/blocker after failed block challenge. ActionPlayer: ${!!originalActionPlayer}, Blocker: ${!!failedBlocker}`;
                   newState = createErrorState(errorMsg, newState);
@@ -2093,14 +2101,13 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
                 }
 
                 // Evaluate Block (if possible in this stage/context)
-                // Block is possible if the claim is an ACTION (not block) and AI is target or it's Foreign Aid/Assassination
                 const originalActionType = typeof actionOrBlockClaim === 'string' && !actionOrBlockClaim.startsWith('Block ') ? actionOrBlockClaim as ActionType : null;
                 const blockTypeForOriginalAction = originalActionType ? getBlockTypeForAction(originalActionType) : null;
                  // Check if *this specific block* is a valid response in the current stage
                  const canConsiderBlock = originalActionType && blockTypeForOriginalAction && validStageResponses.includes(blockTypeForOriginalAction);
-                // AI can physically block if it's a blockable action AND (it's FA/Assassinate OR AI is the target)
+                // AI can physically block if it's a blockable action AND (it's FA OR AI is the target)
                 const canPhysicallyBlock = canConsiderBlock &&
-                                          (originalActionType === 'Foreign Aid' || (originalActionType === 'Assassinate' && actionTarget?.id === aiPlayerState.id) || (originalActionType === 'Steal' && actionTarget?.id === aiPlayerState.id));
+                                          (originalActionType === 'Foreign Aid' || (actionTarget?.id === aiPlayerState.id));
 
                  // Only evaluate block if AI can physically block and didn't decide to challenge the action claim
                 if (canPhysicallyBlock && blockTypeForOriginalAction && !challengeDecision.shouldChallenge) {

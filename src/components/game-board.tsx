@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType, ChallengeDecisionType, BlockActionType } from '@/lib/game-types';
@@ -237,7 +238,8 @@ const ResponsePrompt: React.FC<{
     const claim = phase.action; // The action OR block being claimed
     const originalActionTarget = phase.targetPlayer; // Original action target (if applicable)
     const stage = phase.stage || 'challenge_action'; // Default to challenge_action if stage not set
-    const validResponses = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Use valid responses defined in the phase
+    // Use valid responses defined in the phase, fall back to generous defaults
+    const validResponses = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination'];
 
 
     let promptText = "";
@@ -255,9 +257,16 @@ const ResponsePrompt: React.FC<{
              promptText += " What do you do?";
             break;
          case 'block_decision':
-             // Specifically for Assassination: Target (human) decides whether to block or allow
+             // Target (human) decides whether to block or allow an action like Assassinate or Steal
              title = "Block or Allow?";
-             promptText = `${claimer.name} is attempting to Assassinate You. Do you claim Contessa to block, or allow the assassination?`;
+             if (claim === 'Assassinate') {
+                promptText = `${claimer.name} is attempting to Assassinate You. Do you claim Contessa to block, or allow the assassination?`;
+             } else if (claim === 'Steal') {
+                promptText = `${claimer.name} is attempting to Steal from You. Do you claim Captain or Ambassador to block, or allow the steal?`;
+             } else {
+                // Fallback for other blockable actions if needed
+                 promptText = `${claimer.name} is attempting ${claim} targeting You. Do you block or allow?`;
+             }
              break;
         case 'challenge_block':
             // Someone claimed a block (e.g., Block Foreign Aid, Block Stealing, Block Assassination)
@@ -293,7 +302,7 @@ const ResponsePrompt: React.FC<{
                  )}
                  {/* Show relevant Block button(s) if valid */}
                  {validResponses.filter(r => r.startsWith('Block')).map(blockResponse => (
-                     <Button key={blockResponse} onClick={() => onResponse(blockResponse)} variant="outline">
+                     <Button key={blockResponse} onClick={() => onResponse(blockResponse as GameResponseType)} variant="outline">
                          <Ban className="w-4 h-4 mr-1" /> {blockResponse}
                      </Button>
                  ))}
