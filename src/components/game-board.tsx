@@ -237,7 +237,33 @@ const ResponsePrompt: React.FC<{
     const claim = phase.action; // The action OR block being claimed
     const originalActionTarget = phase.targetPlayer; // Original action target (if applicable)
     const stage = phase.stage || 'challenge_action'; // Default to challenge_action if stage not set
-    const validResponses = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Possible responses for this stage
+    // Dynamically generate valid responses based on the current stage and action
+    let validResponses: GameResponseType[] = ['Allow']; // Allow is always possible? Maybe not...
+    if (stage === 'challenge_action') {
+        // Can always challenge the initial action claim
+        validResponses.push('Challenge');
+        // Determine potential blocks based on the action
+        const blockType = getBlockTypeForAction(claim as ActionType);
+        if (blockType) {
+            // Can block if it's foreign aid, OR if human is target of steal/assassinate
+             const canBlock = blockType === 'Block Foreign Aid' ||
+                             (blockType === 'Block Stealing' && originalActionTarget?.id === humanPlayerId) ||
+                             (blockType === 'Block Assassination' && originalActionTarget?.id === humanPlayerId);
+            if (canBlock) {
+                 validResponses.push(blockType);
+            }
+        }
+    } else if (stage === 'block_decision') {
+         // Target deciding on Assassinate block
+         validResponses = ['Block Assassination', 'Allow']; // Only these two options
+    } else if (stage === 'challenge_block') {
+         // Can challenge the block claim
+         validResponses.push('Challenge');
+    } else {
+        // Fallback, should not happen
+        validResponses = ['Allow', 'Challenge'];
+    }
+
 
 
     let promptText = "";
@@ -379,44 +405,20 @@ const ForcedRevealPrompt: React.FC<{
     humanPlayerId: string;
     onForceReveal: (cardToReveal: CardType) => void; // Needs card type
 }> = ({ gameState, humanPlayerId, onForceReveal }) => {
-    // Determine if human player needs to reveal based on game logic flags (more robust)
-    // This requires game logic to set a specific flag, e.g., `playerNeedsToReveal: playerId`
-    // For now, we'll keep the simplified/less reliable log check as placeholder
+    // Use the dedicated flag from game state
+    const needsToReveal = gameState.playerNeedsToReveal === humanPlayerId;
     const player = gameState.players.find(p => p.id === humanPlayerId);
 
-
-    // Example of how a dedicated flag would work:
-    // const needsToReveal = gameState.playerNeedsToReveal === humanPlayerId;
-
-    // Placeholder log check (less reliable - NEEDS REPLACEMENT WITH DEDICATED FLAG):
-     const lastLog = gameState.actionLog[gameState.actionLog.length - 1] || "";
-     const requiresHumanRevealBasedOnLog = player && player.influence.some(c => !c.revealed) &&
-                                 (lastLog.includes(`${player.name} loses the challenge and must reveal influence`) ||
-                                  lastLog.includes(`${player.name} loses the block challenge and must reveal influence`) ||
-                                   // Needs better triggers - Coup/Assassinate results aren't always the *very* last log entry
-                                   // before the reveal is needed. Relying on logs is fragile.
-                                  lastLog.includes(`performs a Coup against ${player.name}`) ||
-                                  lastLog.includes(`Assassination against ${player.name} succeeds`));
-                                  // We need a better flag in game state! e.g., gameState.playerNeedsReveal: playerId
-
-    // Combine checks (replace with proper flag check when implemented)
-     if (!player || !requiresHumanRevealBasedOnLog) { // Replace requiresHumanRevealBasedOnLog with flag check
+    if (!needsToReveal || !player) {
          return null;
      }
 
     const unrevealedCards = player.influence.filter(c => !c.revealed);
 
     // If only one card left, it should be revealed automatically by game logic usually.
-    // This prompt is mainly for choosing *which* card when multiple are available.
+     // Auto-reveal is handled in handleForceReveal now
     if (unrevealedCards.length <= 1) {
-        // Game logic should handle auto-reveal for the last card.
-        // If it gets here with 1 card, maybe call onForceReveal automatically?
-        // useEffect(() => {
-        //    if (unrevealedCards.length === 1) {
-        //       onForceReveal(unrevealedCards[0].type);
-        //    }
-        // }, [unrevealedCards, onForceReveal]);
-        return null; // Hide prompt if only 0 or 1 card left
+        return null; // Hide prompt if only 0 or 1 card left, logic handles it
     }
 
     return (
@@ -443,6 +445,8 @@ const ChallengeDecisionPrompt: React.FC<{
     onChallengeDecision: (decision: ChallengeDecisionType) => void;
 }> = ({ gameState, humanPlayerId, onChallengeDecision }) => {
     const decisionPhase = gameState.pendingChallengeDecision;
+    console.log("[ChallengeDecisionPrompt] Rendering. Phase:", decisionPhase, "Human ID:", humanPlayerId);
+
 
     // Show only if it's the human player's turn to decide
     if (!decisionPhase || decisionPhase.challengedPlayerId !== humanPlayerId) {
@@ -453,6 +457,8 @@ const ChallengeDecisionPrompt: React.FC<{
     const actionOrBlock = decisionPhase.actionOrBlock;
 
     if (!challenger) return null; // Safety check
+
+     console.log("[ChallengeDecisionPrompt] Displaying prompt for human.");
 
     return (
         <Card className="mt-4 border-yellow-500 border-2 shadow-lg">
@@ -482,6 +488,7 @@ const AssassinationConfirmationPrompt: React.FC<{
     onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void;
 }> = ({ gameState, humanPlayerId, onAssassinationConfirmation }) => {
     const confirmPhase = gameState.pendingAssassinationConfirmation;
+     console.log("[AssassinationConfirmationPrompt] Rendering. Phase:", confirmPhase, "Human ID:", humanPlayerId);
 
     // Show only if it's the human player's (Assassin) turn to confirm
     if (!confirmPhase || confirmPhase.assassinPlayerId !== humanPlayerId) {
@@ -491,6 +498,8 @@ const AssassinationConfirmationPrompt: React.FC<{
     const contessaPlayer = gameState.players.find(p => p.id === confirmPhase.contessaPlayerId);
 
     if (!contessaPlayer) return null; // Safety check
+
+    console.log("[AssassinationConfirmationPrompt] Displaying prompt for human Assassin.");
 
     return (
         <Card className="mt-4 border-orange-500 border-2 shadow-lg">
@@ -517,6 +526,8 @@ const AssassinationConfirmationPrompt: React.FC<{
 export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal, onChallengeDecision, onAssassinationConfirmation }) => {
     const humanPlayer = gameState.players.find(p => p.id === humanPlayerId);
     const otherPlayers = gameState.players.filter(p => p.id !== humanPlayerId);
+     console.log("[GameBoard] Rendering. GameState:", gameState, "Human ID:", humanPlayerId); // Add top-level log
+
 
     // Determine if the human player *needs* to act
     const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation && !gameState.winner;
@@ -524,8 +535,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
     const isHumanExchanging = gameState.pendingExchange?.player.id === humanPlayerId;
     const isHumanDecidingChallenge = gameState.pendingChallengeDecision?.challengedPlayerId === humanPlayerId;
     const isHumanConfirmingAssassination = gameState.pendingAssassinationConfirmation?.assassinPlayerId === humanPlayerId;
-    // Placeholder for forced reveal trigger - Needs gameState flag
-     const isHumanForcedToReveal = false; // Replace with actual flag check later: gameState.playerNeedsReveal === humanPlayerId;
+    const isHumanForcedToReveal = gameState.playerNeedsToReveal === humanPlayerId; // Use the direct flag
+
+      // Log which prompt should be active
+      console.log("[GameBoard] Active States:", {
+         isHumanTurn,
+         isHumanResponding,
+         isHumanExchanging,
+         isHumanDecidingChallenge,
+         isHumanConfirmingAssassination,
+         isHumanForcedToReveal
+       });
 
 
     return (
@@ -569,8 +589,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
                  {isHumanDecidingChallenge && <ChallengeDecisionPrompt gameState={gameState} humanPlayerId={humanPlayerId} onChallengeDecision={onChallengeDecision} />}
                  {isHumanConfirmingAssassination && <AssassinationConfirmationPrompt gameState={gameState} humanPlayerId={humanPlayerId} onAssassinationConfirmation={onAssassinationConfirmation} />}
                 {isHumanExchanging && <ExchangePrompt gameState={gameState} humanPlayerId={humanPlayerId} onExchange={onExchange} />}
-                {/* Add ForcedRevealPrompt here - Needs better logic trigger */}
-                 {/* <ForcedRevealPrompt gameState={gameState} humanPlayerId={humanPlayerId} onForceReveal={onForceReveal} /> */}
+                {isHumanForcedToReveal && <ForcedRevealPrompt gameState={gameState} humanPlayerId={humanPlayerId} onForceReveal={onForceReveal} />}
             </div>
         </div>
     );
@@ -584,4 +603,14 @@ function getActionFromBlock(block: BlockActionType): ActionType | null {
        case 'Block Assassination': return 'Assassinate';
        default: return null;
    }
+}
+
+// Helper to find which block corresponds to an action
+function getBlockTypeForAction(action: ActionType): BlockActionType | null {
+     switch (action) {
+        case 'Foreign Aid': return 'Block Foreign Aid';
+        case 'Steal': return 'Block Stealing';
+        case 'Assassinate': return 'Block Assassination';
+        default: return null;
+    }
 }
