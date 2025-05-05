@@ -21,7 +21,7 @@ const AiChallengeReasoningInputSchema = z.object({
   targetPlayerName: z.string().optional().describe('The name of the target player of the *original* action, if the thing being challenged is a block.'),
   aiInfluenceCards: z.array(z.string()).describe("The AI player’s current *unrevealed* influence cards (e.g., ['Duke', 'Assassin'])."),
   opponentInfluenceCount: z.number().describe('The number of *unrevealed* influence cards the player performing the action/block has.'),
-  opponentMoney: z.number().describe('The amount of money the opponent performing the action/block has.'),
+  opponentMoney: z.number().describe('The amount of money the opponent performing the action/block has *after* potentially paying the action cost (if any).'), // Clarify money timing
   gameState: z.string().describe('A summary of the current game state including all players money and revealed cards, and recent action log summary.'),
   rulebook: z.string().optional().describe('Reference text of the Coup rulebook.'), // Add rulebook to input
 });
@@ -51,10 +51,14 @@ You are an AI player in the card game Coup. An opponent has declared an action o
 **Claim Being Made:**
 - Action or Block: {{actionOrBlock}}
 - Claimed by: {{playerName}}
-- Opponent's Status: {{opponentInfluenceCount}} unrevealed influence, {{opponentMoney}} coins.
+- Opponent's Status: {{opponentInfluenceCount}} unrevealed influence, {{opponentMoney}} coins. (Note: Money shown might be *after* paying action cost).
 {{#if targetPlayerName}}
 - (If blocking) Original Action Target: {{targetPlayerName}}
 {{/if}}
+
+**Specific Action Cost Considerations:**
+- Assassinate costs 3 coins. If the opponent claims Assassinate and has {{opponentMoney}} coins now, they must have had at least 3 coins *before* taking the action.
+- Coup costs 7 coins (irrelevant for challenges, but useful context).
 
 **Your Current Situation:**
 - Your Unrevealed Influence: [{{#each aiInfluenceCards}}{{this}}{{#unless @last}}, {{/unless}}{{/each}}]
@@ -64,7 +68,7 @@ You are an AI player in the card game Coup. An opponent has declared an action o
 
 **Your Task:**
 Decide whether to challenge the opponent's claim (that they possess the necessary influence card for the declared {{actionOrBlock}}).
-- Assess the likelihood the opponent is bluffing based on their previous actions, current money, remaining influence, and overall game state.
+- Assess the likelihood the opponent is bluffing based on their previous actions, current money (considering potential action costs), remaining influence, and overall game state.
 - Consider the consequences of a successful challenge (opponent loses influence) vs. a failed challenge (you lose influence). Is the potential gain worth the risk?
 - Does challenging benefit you strategically, even if you might lose? (e.g., gaining information, forcing a card reveal).
 - Provide your reasoning, explaining why you chose to challenge or not challenge.

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Coins, Swords, Shield, Handshake, Skull, Replace, HandCoins, CircleDollarSign, HelpCircle, Ban, Check, ShieldAlert, ShieldCheck } from 'lucide-react'; // Added ShieldAlert, ShieldCheck
+import { Coins, Swords, Shield, Handshake, Skull, Replace, HandCoins, CircleDollarSign, HelpCircle, Ban, Check, ShieldAlert, ShieldCheck, UserCheck, UserX } from 'lucide-react'; // Added ShieldAlert, ShieldCheck, UserCheck, UserX
 import React, { useState, useEffect } from 'react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,6 +20,7 @@ interface GameBoardProps {
   onExchange: (cardsToKeep: CardType[]) => void;
   onForceReveal: (cardToReveal: CardType) => void; // Needs card type
   onChallengeDecision: (decision: ChallengeDecisionType) => void; // Add this prop
+  onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void; // Add this prop
 }
 
 // Mapping Card Types to Icons and Colors (adjust colors as needed)
@@ -110,8 +111,8 @@ const ActionButtons: React.FC<{
     const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId;
     const mustCoup = (humanPlayer?.money ?? 0) >= 10;
 
-    // Don't show buttons if not human's turn, or waiting for response/exchange/decision/game over
-    if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.pendingChallengeDecision || gameState.winner) {
+    // Don't show buttons if not human's turn, or waiting for response/exchange/decision/confirmation/game over
+    if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.pendingChallengeDecision || gameState.pendingAssassinationConfirmation || gameState.winner) {
         return null;
     }
 
@@ -226,14 +227,11 @@ const ResponsePrompt: React.FC<{
 }> = ({ gameState, humanPlayerId, onResponse }) => {
     const phase = gameState.challengeOrBlockPhase;
     // Check if it's the response phase AND the human is one of the possible responders AND hasn't responded yet
-    if (!phase || !phase.possibleResponses.some(p => p.id === humanPlayerId) || phase.responses.some(r => r.playerId === humanPlayerId)) {
+    // AND ensure no other pending decision/confirmation is active
+    if (!phase || !phase.possibleResponses.some(p => p.id === humanPlayerId) || phase.responses.some(r => r.playerId === humanPlayerId) || gameState.pendingChallengeDecision || gameState.pendingAssassinationConfirmation) {
         return null;
     }
 
-    // Also check if there's a pending challenge decision, if so, don't show this prompt
-    if (gameState.pendingChallengeDecision) {
-        return null;
-    }
 
     const claimer = phase.actionPlayer; // Player making the current claim (action or block)
     const claim = phase.action; // The action OR block being claimed
@@ -264,8 +262,8 @@ const ResponsePrompt: React.FC<{
         case 'challenge_block':
             // Someone claimed a block (e.g., Block Foreign Aid, Block Stealing, Block Assassination)
             const blockerName = claimer.name; // actionPlayer is the blocker in this stage
-            const originalActionTaker = originalActionTarget?.name || 'Unknown'; // targetPlayer is the original action taker
-            const originalAction = getActionFromBlock(claim as BlockActionType); // Get the action that was blocked
+            const originalActionTaker = originalActionTarget?.name || 'Unknown'; // targetPlayer is the original action taker (stored differently now, might need adjustment in logic)
+             const originalAction = getActionFromBlock(claim as BlockActionType); // Get the action that was blocked
              promptText = `${blockerName} claims to ${claim} against ${originalActionTaker}'s ${originalAction}. Do you challenge their claim?`;
             break;
         default:
@@ -477,16 +475,55 @@ const ChallengeDecisionPrompt: React.FC<{
     );
 };
 
+// New component for the Assassin's confirmation after Contessa block
+const AssassinationConfirmationPrompt: React.FC<{
+    gameState: GameState;
+    humanPlayerId: string;
+    onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void;
+}> = ({ gameState, humanPlayerId, onAssassinationConfirmation }) => {
+    const confirmPhase = gameState.pendingAssassinationConfirmation;
 
-export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal, onChallengeDecision }) => {
+    // Show only if it's the human player's (Assassin) turn to confirm
+    if (!confirmPhase || confirmPhase.assassinPlayerId !== humanPlayerId) {
+        return null;
+    }
+
+    const contessaPlayer = gameState.players.find(p => p.id === confirmPhase.contessaPlayerId);
+
+    if (!contessaPlayer) return null; // Safety check
+
+    return (
+        <Card className="mt-4 border-orange-500 border-2 shadow-lg">
+            <CardHeader>
+                <CardTitle>Assassination Blocked!</CardTitle>
+                <CardDescription>
+                    {contessaPlayer.name} claims Contessa to block your assassination.
+                    Do you challenge their Contessa claim or accept the block?
+                </CardDescription>
+            </CardHeader>
+            <CardContent className="flex gap-2 justify-center">
+                <Button onClick={() => onAssassinationConfirmation('Challenge Contessa')} variant="destructive">
+                    <UserX className="w-4 h-4 mr-1" /> Challenge Contessa
+                </Button>
+                <Button onClick={() => onAssassinationConfirmation('Accept Block')} variant="secondary">
+                    <UserCheck className="w-4 h-4 mr-1" /> Accept Block
+                </Button>
+            </CardContent>
+        </Card>
+    );
+};
+
+
+export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal, onChallengeDecision, onAssassinationConfirmation }) => {
     const humanPlayer = gameState.players.find(p => p.id === humanPlayerId);
     const otherPlayers = gameState.players.filter(p => p.id !== humanPlayerId);
 
     // Determine if the human player *needs* to act
-    const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.winner;
-    const isHumanResponding = gameState.challengeOrBlockPhase?.possibleResponses.some(p => p.id === humanPlayerId) && !gameState.challengeOrBlockPhase?.responses.some(r => r.playerId === humanPlayerId);
+    const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation && !gameState.winner;
+    const isHumanResponding = gameState.challengeOrBlockPhase?.possibleResponses.some(p => p.id === humanPlayerId) && !gameState.challengeOrBlockPhase?.responses.some(r => r.playerId === humanPlayerId) && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation;
     const isHumanExchanging = gameState.pendingExchange?.player.id === humanPlayerId;
     const isHumanDecidingChallenge = gameState.pendingChallengeDecision?.challengedPlayerId === humanPlayerId;
+    const isHumanConfirmingAssassination = gameState.pendingAssassinationConfirmation?.assassinPlayerId === humanPlayerId;
     // Placeholder for forced reveal trigger - Needs gameState flag
      const isHumanForcedToReveal = false; // Replace with actual flag check later: gameState.playerNeedsReveal === humanPlayerId;
 
@@ -530,6 +567,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
                 {isHumanTurn && <ActionButtons gameState={gameState} humanPlayerId={humanPlayerId} onAction={onAction} />}
                 {isHumanResponding && <ResponsePrompt gameState={gameState} humanPlayerId={humanPlayerId} onResponse={onResponse} />}
                  {isHumanDecidingChallenge && <ChallengeDecisionPrompt gameState={gameState} humanPlayerId={humanPlayerId} onChallengeDecision={onChallengeDecision} />}
+                 {isHumanConfirmingAssassination && <AssassinationConfirmationPrompt gameState={gameState} humanPlayerId={humanPlayerId} onAssassinationConfirmation={onAssassinationConfirmation} />}
                 {isHumanExchanging && <ExchangePrompt gameState={gameState} humanPlayerId={humanPlayerId} onExchange={onExchange} />}
                 {/* Add ForcedRevealPrompt here - Needs better logic trigger */}
                  {/* <ForcedRevealPrompt gameState={gameState} humanPlayerId={humanPlayerId} onForceReveal={onForceReveal} /> */}

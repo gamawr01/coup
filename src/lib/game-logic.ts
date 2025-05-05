@@ -374,22 +374,23 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
     const potentialBlockers = getActivePlayers(newState).filter(p => p.id !== playerId);
 
     if (potentialBlockers.length > 0) {
-         console.log(`[performForeignAid] Potential blockers/challengers exist. Entering phase.`);
+         console.log(`[performForeignAid] Potential blockers exist. Entering phase.`);
          newState.challengeOrBlockPhase = {
             actionPlayer: player,
             action: 'Foreign Aid',
             possibleResponses: potentialBlockers,
             responses: [],
             stage: 'challenge_action', // Initial stage: block or allow
-            validResponses: ['Allow', 'Block Foreign Aid'], // Foreign Aid cannot be challenged, only blocked by Duke.
+            // Foreign Aid cannot be challenged, only blocked by Duke claim.
+            validResponses: ['Allow', 'Block Foreign Aid'],
         };
-        // AI needs to decide to challenge or block here
+        // AI needs to decide to block here
          const stateAfterTrigger = await triggerAIResponses(newState);
          newState = stateAfterTrigger;
 
     } else {
         // No one can challenge or block, action succeeds immediately
-         console.log(`[performForeignAid] No blockers/challengers. Action succeeds.`);
+         console.log(`[performForeignAid] No blockers. Action succeeds.`);
         const playerIndex = newState.players.findIndex(p => p.id === playerId);
          if (playerIndex !== -1) {
             const amount = Math.min(2, newState.treasury);
@@ -837,7 +838,7 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
          // --- Handle Block (during initial challenge_action stage) ---
          const blockerId = blocks[0].playerId;
          const blockType = blocks[0].response as BlockActionType;
-         console.log(`[resolveChallengeOrBlock] Block (${blockType}) found from ${blockerId}. Setting up challenge_block phase.`);
+         console.log(`[resolveChallengeOrBlock] Block (${blockType}) found from ${blockerId}. Setting up next phase.`);
          const originalActionPlayer = newState.currentAction?.player; // Get original player from context
           if (!originalActionPlayer) {
                const errorMsg = "[resolveChallengeOrBlock] Error: Cannot find original action player context when handling block.";
@@ -849,19 +850,38 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
              return createErrorState(errorMsg, newState);
           }
 
-         // Set up the next phase: challenging the block itself
-         newState.challengeOrBlockPhase = {
-             actionPlayer: blocker, // Blocker is now the one making the claim (the block)
-             action: blockType, // The claim is the block type
-             targetPlayer: originalActionPlayer, // Target of the block challenge is the original action player
-             possibleResponses: getActivePlayers(newState).filter(p => p.id !== blockerId), // Anyone else can challenge the block claim
-             responses: [],
-             stage: 'challenge_block',
-             validResponses: ['Challenge', 'Allow'], // Only challenge or allow the block claim
-         };
-          newState = logAction(newState, `${blocker.name} claims to ${blockType}. Others can challenge this claim.`);
-          // Trigger AI responses for challenging the block
-          newState = await triggerAIResponses(newState);
+         // Handle specific block types
+          if (blockType === 'Block Assassination') {
+                console.log(`[resolveChallengeOrBlock] Contessa block claimed for Assassination. Entering confirmation phase.`);
+                 // Enter pendingAssassinationConfirmation
+                 newState.pendingAssassinationConfirmation = {
+                     assassinPlayerId: originalActionPlayer.id,
+                     contessaPlayerId: blocker.id,
+                 };
+                 newState = logAction(newState, `${blocker.name} claims Contessa to block the assassination! ${originalActionPlayer.name}, do you challenge the Contessa claim or accept the block?`);
+                 // Trigger AI decision if Assassin is AI
+                 if (originalActionPlayer.isAI) {
+                     console.log(`[resolveChallengeOrBlock] Triggering AI assassination confirmation for ${originalActionPlayer.name}.`);
+                     newState = await handleAIAssassinationConfirmation(newState);
+                 } else {
+                     console.log(`[resolveChallengeOrBlock] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
+                 }
+            } else {
+                 // Other blocks (Foreign Aid, Steal) enter challenge_block stage
+                 console.log(`[resolveChallengeOrBlock] Standard block (${blockType}). Setting up challenge_block stage.`);
+                 newState.challengeOrBlockPhase = {
+                     actionPlayer: blocker, // Blocker is now the one making the claim (the block)
+                     action: blockType, // The claim is the block type
+                     targetPlayer: originalActionPlayer, // Target of the block challenge is the original action player
+                     possibleResponses: getActivePlayers(newState).filter(p => p.id !== blockerId), // Anyone else can challenge the block claim
+                     responses: [],
+                     stage: 'challenge_block',
+                     validResponses: ['Challenge', 'Allow'], // Only challenge or allow the block claim
+                 };
+                  newState = logAction(newState, `${blocker.name} claims to ${blockType}. Others can challenge this claim.`);
+                  // Trigger AI responses for challenging the block
+                  newState = await triggerAIResponses(newState);
+            }
 
     } else if (stage === 'block_decision' && blocks.length > 0) {
         // --- Handle Block (during block_decision stage for Assassination) ---
@@ -1013,7 +1033,7 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
             if (originalAction && originalActionPlayer) {
                  console.log(`[handleChallengeDecision] Block retreated. Original action ${originalAction} by ${originalActionPlayer.name} proceeds.`);
                  newState = logAction(newState, `${challengedPlayer.name}'s block fails due to retreat. ${originalActionPlayer.name}'s ${originalAction} proceeds.`);
-                 // For Assassinate, if block fails, execute the assassination
+                 // For Assassination, if block fails, execute the assassination
                  if (originalAction === 'Assassinate' && originalTargetPlayer) {
                      newState = logAction(newState, `Assassination against ${originalTargetPlayer.name} proceeds.`);
                       const { newState: revealedState } = await handleForceReveal(newState, originalTargetPlayer.id);
@@ -1619,7 +1639,16 @@ function generateGameStateDescription(gameState: GameState, aiPlayerId: string):
     description += `Deck has ${gameState.deck.length} cards left.\n`;
     description += `Treasury has ${gameState.treasury} coins.\n`;
      if(gameState.currentAction) {
-         description += `Current Action Just Performed: ${gameState.currentAction.player.name} performs ${gameState.currentAction.action} ${gameState.currentAction.target ? `targeting ${gameState.currentAction.target.name}`: ''}.\n`;
+         // Describe the *attempted* action, including cost if relevant
+         let actionDesc = `${gameState.currentAction.player.name} attempting ${gameState.currentAction.action}`;
+         if(gameState.currentAction.target) actionDesc += ` targeting ${gameState.currentAction.target.name}`;
+         if(gameState.currentAction.cost) {
+             const moneyBeforeCost = gameState.currentAction.player.money + gameState.currentAction.cost; // Calculate money before cost paid
+             actionDesc += ` (Cost: ${gameState.currentAction.cost}, Money before: ${moneyBeforeCost}, Money now: ${gameState.currentAction.player.money})`;
+         } else {
+             actionDesc += ` (Money: ${gameState.currentAction.player.money})`;
+         }
+         description += `Current Action Attempt: ${actionDesc}.\n`;
      }
      if(gameState.challengeOrBlockPhase) {
           const phase = gameState.challengeOrBlockPhase;
@@ -2395,43 +2424,6 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      }
 
 
-     // --- Legacy Validation (Removed: Now rely solely on validResponsesForStage) ---
-     /*
-     // Check if response type is valid for the action/block being claimed
-     const claim = phase.action; // The action or block being claimed/responded to
-     if (response === 'Challenge') {
-         if (!getCardForAction(claim)) { // Check if claim is challengeable (has associated card)
-              const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot challenge the claim '${claim}'.`;
-              console.warn(warnMsg);
-             return createErrorState(warnMsg, newState); // Use createErrorState
-         }
-     } else if (response.startsWith('Block')) {
-          // Can only block if the claim was an *action* (not a block itself)
-         if (typeof claim !== 'string' || claim.startsWith('Block ')) {
-               const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot block a block claim ('${claim}').`;
-               console.warn(warnMsg);
-              return createErrorState(warnMsg, newState); // Use createErrorState
-         }
-         // Check if the block type is valid for the original action
-         const blockType = getBlockTypeForAction(claim as ActionType);
-         if (response !== blockType) {
-              const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot use ${response} to block ${claim}. Expected ${blockType || 'no block'}.`;
-              console.warn(warnMsg);
-              return createErrorState(warnMsg, newState); // Use createErrorState
-         }
-         // Ensure blocker is target (if applicable) or it's Foreign Aid/Assassination
-          if (claim === 'Steal' || claim === 'Assassinate') {
-             if (phase.targetPlayer?.id !== respondingPlayerId) {
-                  const warnMsg = `[API handlePlayerResponse] Invalid response: Only target ${phase.targetPlayer?.name} can block ${claim}.`;
-                  console.warn(warnMsg);
-                 return createErrorState(warnMsg, newState); // Use createErrorState
-             }
-         }
-          // Foreign Aid can be blocked by anyone (if Duke claim is valid)
-     }
-     */
-
-
     const respondingPlayer = getPlayerById(newState, respondingPlayerId);
      if (!respondingPlayer) { // Safety check
          const errorMsg = `[API handlePlayerResponse] Error: Responding player ${respondingPlayerId} not found.`;
@@ -2516,7 +2508,7 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
                    } else {
                        // Standard block handling: Set up challenge_block phase
-                       console.log(`[API handlePlayerResponse] Standard block claimed. Setting up challenge_block phase.`);
+                       console.log(`[API handlePlayerResponse] Standard block (${blockType}). Setting up challenge_block stage.`);
                         newState.challengeOrBlockPhase = {
                            actionPlayer: blocker, // Blocker is claiming the block card
                            action: blockType, // Claim is the block itself
