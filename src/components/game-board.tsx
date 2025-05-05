@@ -237,33 +237,7 @@ const ResponsePrompt: React.FC<{
     const claim = phase.action; // The action OR block being claimed
     const originalActionTarget = phase.targetPlayer; // Original action target (if applicable)
     const stage = phase.stage || 'challenge_action'; // Default to challenge_action if stage not set
-    // Dynamically generate valid responses based on the current stage and action
-    let validResponses: GameResponseType[] = ['Allow']; // Allow is always possible? Maybe not...
-    if (stage === 'challenge_action') {
-        // Can always challenge the initial action claim
-        validResponses.push('Challenge');
-        // Determine potential blocks based on the action
-        const blockType = getBlockTypeForAction(claim as ActionType);
-        if (blockType) {
-            // Can block if it's foreign aid, OR if human is target of steal/assassinate
-             const canBlock = blockType === 'Block Foreign Aid' ||
-                             (blockType === 'Block Stealing' && originalActionTarget?.id === humanPlayerId) ||
-                             (blockType === 'Block Assassination' && originalActionTarget?.id === humanPlayerId);
-            if (canBlock) {
-                 validResponses.push(blockType);
-            }
-        }
-    } else if (stage === 'block_decision') {
-         // Target deciding on Assassinate block
-         validResponses = ['Block Assassination', 'Allow']; // Only these two options
-    } else if (stage === 'challenge_block') {
-         // Can challenge the block claim
-         validResponses.push('Challenge');
-    } else {
-        // Fallback, should not happen
-        validResponses = ['Allow', 'Challenge'];
-    }
-
+    const validResponses = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Use valid responses defined in the phase
 
 
     let promptText = "";
@@ -288,9 +262,10 @@ const ResponsePrompt: React.FC<{
         case 'challenge_block':
             // Someone claimed a block (e.g., Block Foreign Aid, Block Stealing, Block Assassination)
             const blockerName = claimer.name; // actionPlayer is the blocker in this stage
-            const originalActionTaker = originalActionTarget?.name || 'Unknown'; // targetPlayer is the original action taker (stored differently now, might need adjustment in logic)
+            const originalActionTakerPlayer = gameState.currentAction?.player; // Get original action taker from context
+            const originalActionTakerName = originalActionTakerPlayer?.name || 'Unknown';
              const originalAction = getActionFromBlock(claim as BlockActionType); // Get the action that was blocked
-             promptText = `${blockerName} claims to ${claim} against ${originalActionTaker}'s ${originalAction}. Do you challenge their claim?`;
+             promptText = `${blockerName} claims to ${claim} against ${originalActionTakerName}'s ${originalAction}. Do you challenge their claim?`;
             break;
         default:
              promptText = `${claimer.name} claims ${claim}. What do you do?`; // Fallback
@@ -341,25 +316,32 @@ const ExchangePrompt: React.FC<{
 
     const cardsToChooseFrom = exchangeInfo.cardsToChoose;
     const currentInfluenceCount = player.influence.filter(c => !c.revealed).length;
-    const [selectedCards, setSelectedCards] = useState<CardType[]>([]);
+    // State now stores the indices of selected cards from the `cardsToChooseFrom` array
+    const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
 
-    const handleCardToggle = (card: CardType) => {
-        setSelectedCards(prev => {
-            const cardIndex = prev.findIndex(c => c === card); // Find first instance
-             if (cardIndex > -1) {
-                 // Deselect: remove only the first instance found
-                 const newSelection = [...prev];
-                 newSelection.splice(cardIndex, 1);
-                 return newSelection;
+    const handleCardToggle = (index: number) => {
+        setSelectedIndices(prev => {
+            const isSelected = prev.includes(index);
+             if (isSelected) {
+                 // Deselect: remove the index
+                 return prev.filter(i => i !== index);
              } else if (prev.length < currentInfluenceCount) {
                 // Select if not exceeding limit
-                return [...prev, card];
+                return [...prev, index];
             }
             return prev; // Limit reached, do nothing
         });
     };
 
-    const canConfirm = selectedCards.length === currentInfluenceCount;
+    const canConfirm = selectedIndices.length === currentInfluenceCount;
+
+    // Map selected indices back to card types for the onExchange callback
+    const handleConfirm = () => {
+         if (canConfirm) {
+            const cardsToKeep = selectedIndices.map(index => cardsToChooseFrom[index]);
+            onExchange(cardsToKeep);
+         }
+     };
 
     return (
         <Card className="mt-4 border-primary border-2 shadow-lg">
@@ -370,20 +352,12 @@ const ExchangePrompt: React.FC<{
             <CardContent>
                 <div className="flex flex-wrap gap-2 justify-center mb-4">
                     {cardsToChooseFrom.map((card, index) => {
-                         // Count how many times this card type is already selected
-                        const countSelected = selectedCards.filter(c => c === card).length;
-                        // Count how many times this card type is available in total
-                        const countAvailable = cardsToChooseFrom.filter(c => c === card).length;
-                         // Determine if *this specific instance* of the card is selected
-                         // This requires a more complex check or state structure if we need to differentiate identical cards visually
-                         // For simplicity, we'll base 'selected' state on inclusion in the array
-                         const isSelected = selectedCards.includes(card); // This might highlight all cards of the same type
-
+                         const isSelected = selectedIndices.includes(index);
                          return (
                              <Button
-                                key={`${card}-${index}`} // Use index for unique key
+                                key={index} // Use index as the unique key
                                 variant={isSelected ? 'default' : 'outline'}
-                                onClick={() => handleCardToggle(card)}
+                                onClick={() => handleCardToggle(index)}
                                 className="flex items-center gap-1"
                               >
                                  {cardInfo[card].icon} {card}
@@ -391,7 +365,7 @@ const ExchangePrompt: React.FC<{
                          );
                     })}
                 </div>
-                 <Button onClick={() => onExchange(selectedCards)} disabled={!canConfirm} className="w-full">
+                 <Button onClick={handleConfirm} disabled={!canConfirm} className="w-full">
                      Confirm Selection
                  </Button>
             </CardContent>
