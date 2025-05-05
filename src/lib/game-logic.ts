@@ -446,7 +446,7 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
             responses: [],
             stage: 'challenge_action', // Only blocking is possible
             // Foreign Aid cannot be challenged, only blocked by Duke claim.
-            validResponses: ['Allow', 'Block Foreign Aid'],
+             validResponses: ['Allow', 'Block Foreign Aid'], // Only Block or Allow
         };
         // AI needs to decide to block here
          const stateAfterTrigger = await triggerAIResponses(newState);
@@ -1013,46 +1013,57 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
                newState = await triggerAIResponses(newState); // Trigger challenges against the block
          }
 
-    } else if (allows.length === phase.possibleResponses.length || phase.possibleResponses.length === 0 ) {
-        // --- Handle All Allows / No Responses Possible ---
-         console.log(`[resolveChallengeOrBlock] No challenges or blocks received (or possible). Proceeding with claim: ${actionOrBlock}`);
+     } else if (allows.length === phase.possibleResponses.length || phase.possibleResponses.length === 0 ) {
+         // --- Handle All Allows / No Responses Possible ---
+          console.log(`[resolveChallengeOrBlock] No challenges or blocks received (or possible). Processing claim: ${actionOrBlock}, Stage: ${stage}`);
          // Refresh action player state before executing
-        const currentClaimer = getPlayerById(newState, phase.actionPlayer.id)!;
-         const originalTarget = getPlayerById(newState, phase.targetPlayer?.id || '');
+         const currentClaimer = getPlayerById(newState, phase.actionPlayer.id)!; // Player making the current claim or original action player
+         const originalTarget = getPlayerById(newState, phase.targetPlayer?.id || ''); // Original target if relevant
+         const originalAction = newState.currentAction?.action; // Get original action type from context
 
-        if (actionOrBlock.startsWith('Block ')) {
-             // A block claim was allowed (not challenged). Block succeeds.
-             const originalAction = getActionFromBlock(actionOrBlock as BlockActionType);
-             const originalActionPlayer = newState.currentAction?.player; // Get from context
-             if (originalAction && originalActionPlayer) {
-                 newState = logAction(newState, `No challenge to ${currentClaimer.name}'s claim of ${actionOrBlock}. Block succeeds. ${originalActionPlayer.name}'s ${originalAction} is cancelled.`);
-             } else {
-                  newState = logAction(newState, `No challenge to ${currentClaimer.name}'s claim of ${actionOrBlock}. Block succeeds, original action cancelled.`);
-             }
-             newState = await advanceTurn(newState);
-        } else {
-             // An action claim was allowed (not challenged or blocked).
-             newState = logAction(newState, `No challenges or blocks. ${currentClaimer.name}'s ${actionOrBlock} attempt succeeds.`);
-             // For Assassination/Steal, this means the claim passed, now check block
-             if ((actionOrBlock === 'Assassinate' || actionOrBlock === 'Steal') && originalTarget) {
-                  console.log(`[resolveChallengeOrBlock] ${actionOrBlock} claim successful. Proceeding to block_decision stage.`);
-                   newState.challengeOrBlockPhase = {
-                      actionPlayer: currentClaimer, // Original action player
-                      action: actionOrBlock as ActionType, // Original action
-                      targetPlayer: originalTarget, // Target
-                      possibleResponses: [originalTarget], // Only target can block
-                      responses: [],
-                      stage: 'block_decision',
-                      validResponses: actionOrBlock === 'Assassinate' ? ['Block Assassination', 'Allow'] : ['Block Stealing', 'Allow'],
-                  };
-                   newState = logAction(newState, `${originalTarget.name}, do you block ${actionOrBlock} with ${actionOrBlock === 'Assassinate' ? 'Contessa' : 'Captain/Ambassador'} or allow?`);
-                   newState = await triggerAIResponses(newState);
+          if (actionOrBlock.startsWith('Block ')) {
+              // A block claim was allowed (not challenged). Block succeeds.
+              const originalActionFromBlock = getActionFromBlock(actionOrBlock as BlockActionType); // Map block back to action
+              const originalActionPlayer = newState.currentAction?.player; // Get original player from context
+              if (originalActionFromBlock && originalActionPlayer) {
+                  newState = logAction(newState, `No challenge to ${currentClaimer.name}'s claim of ${actionOrBlock}. Block succeeds. ${originalActionPlayer.name}'s ${originalActionFromBlock} is cancelled.`);
               } else {
-                   // Execute other successful actions (Tax, Foreign Aid, Exchange)
-                   newState = await executeSuccessfulAction(newState, currentClaimer, actionOrBlock as ActionType, originalTarget);
+                   newState = logAction(newState, `No challenge to ${currentClaimer.name}'s claim of ${actionOrBlock}. Block succeeds, original action cancelled.`);
               }
-        }
-    } else {
+              newState = await advanceTurn(newState);
+         } else if (stage === 'block_decision' && allows.length > 0) {
+              // Target chose to ALLOW the action (Assassinate/Steal)
+              console.log(`[resolveChallengeOrBlock] Target ${originalTarget?.name} allowed the action ${originalAction}.`);
+              newState = logAction(newState, `${originalTarget?.name} allows ${originalAction}.`);
+              newState = await executeSuccessfulAction(newState, currentClaimer, originalAction as ActionType, originalTarget);
+         } else if (stage === 'challenge_action') {
+              // An action claim was allowed (not challenged or blocked).
+              newState = logAction(newState, `No challenges or blocks. ${currentClaimer.name}'s ${actionOrBlock} attempt succeeds.`);
+              // For Assassination/Steal, this means the claim passed, now check block
+              if ((actionOrBlock === 'Assassinate' || actionOrBlock === 'Steal') && originalTarget) {
+                   console.log(`[resolveChallengeOrBlock] ${actionOrBlock} claim successful. Proceeding to block_decision stage.`);
+                   // Transition to block decision phase
+                    newState.challengeOrBlockPhase = {
+                       actionPlayer: currentClaimer, // Original action player
+                       action: actionOrBlock as ActionType, // Original action
+                       targetPlayer: originalTarget, // Target
+                       possibleResponses: [originalTarget], // Only target can block
+                       responses: [],
+                       stage: 'block_decision',
+                       validResponses: actionOrBlock === 'Assassinate' ? ['Block Assassination', 'Allow'] : ['Block Stealing', 'Allow'],
+                   };
+                    newState = logAction(newState, `${originalTarget.name}, do you block ${actionOrBlock} with ${actionOrBlock === 'Assassinate' ? 'Contessa' : 'Captain/Ambassador'} or allow?`);
+                    newState = await triggerAIResponses(newState);
+               } else {
+                    // Execute other successful actions (Tax, Foreign Aid, Exchange)
+                    newState = await executeSuccessfulAction(newState, currentClaimer, actionOrBlock as ActionType, originalTarget);
+               }
+          } else {
+              // Should not be reached if stages are handled correctly
+              console.warn(`[resolveChallengeOrBlock] Reached unexpected 'allow' state. Action: ${actionOrBlock}, Stage: ${stage}. Advancing turn.`);
+               newState = await advanceTurn(newState);
+          }
+     } else {
          // This case should ideally not be reached if logic is correct
          // (e.g., waiting for more responses, which should be handled by triggerAIResponses returning without resolving)
          console.warn(`[resolveChallengeOrBlock] Reached unexpected state. Phase: ${JSON.stringify(phase)}. Returning current state.`);
@@ -2004,45 +2015,25 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
 async function triggerAIResponses(gameState: GameState | null): Promise<GameState> {
      if (!gameState) return createErrorState("[triggerAIResponses] Error: gameState is null.");
     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
-    let currentPhase = newState.challengeOrBlockPhase || newState.pendingChallengeDecision || newState.pendingAssassinationConfirmation ? { ... (newState.challengeOrBlockPhase || newState.pendingChallengeDecision || newState.pendingAssassinationConfirmation) } : null; // Use the active phase
+    let currentPhaseState = newState.challengeOrBlockPhase; // Use the phase from the current state
     let stateBeforeLoop = JSON.parse(JSON.stringify(gameState)); // Keep original state for fallback
 
-     // Determine which list of possible responders to use based on the active phase
-     let possibleResponders: Player[] = [];
-     let currentResponses: {playerId: string, response: GameResponseType | ChallengeDecisionType}[] = [];
-
-     if (newState.challengeOrBlockPhase) {
-         const phase = newState.challengeOrBlockPhase;
-         possibleResponders = phase.possibleResponses;
-         currentResponses = phase.responses;
-         console.log(`[triggerAIResponses] Phase active: Challenge/Block. Action=${phase.action}, Stage=${phase.stage}, Possible Responders=${possibleResponders.map(p=>p.name).join(',')}, Current Responses=${currentResponses.length}`);
-     } else if (newState.pendingChallengeDecision) {
-          // In this phase, only the challenged player 'responds' (Proceed/Retreat), but it's handled separately by handleAIChallengeDecision
-          console.log(`[triggerAIResponses] Phase active: Pending Challenge Decision for ${newState.pendingChallengeDecision.challengedPlayerId}. AI response handled elsewhere.`);
-         return newState; // No standard AI responses needed here
-     } else if (newState.pendingAssassinationConfirmation) {
-          // In this phase, only the assassin 'responds' (Challenge Contessa/Accept Block), handled by handleAIAssassinationConfirmation
-          console.log(`[triggerAIResponses] Phase active: Pending Assassination Confirmation for ${newState.pendingAssassinationConfirmation.assassinPlayerId}. AI response handled elsewhere.`);
-         return newState; // No standard AI responses needed here
-     } else {
-          console.log("[triggerAIResponses] No active challenge/block phase needing AI responses.");
-         return newState; // No relevant phase active
+     // Safety Check: Ensure phase exists
+     if (!currentPhaseState) {
+         console.log("[triggerAIResponses] No active challenge/block phase needing AI responses.");
+         return newState;
      }
 
+     console.log(`[triggerAIResponses] Phase active: Challenge/Block. Action=${currentPhaseState.action}, Stage=${currentPhaseState.stage}, Possible Responders=${currentPhaseState.possibleResponses.map(p=>p.name).join(',')}, Current Responses=${currentPhaseState.responses.length}`);
 
     try {
         // Loop while there's an active challenge/block phase and AI responders who haven't responded yet
-        while (newState.challengeOrBlockPhase && newState.challengeOrBlockPhase.possibleResponses.some(p => p.isAI && !newState.challengeOrBlockPhase?.responses.some(r => r.playerId === p.id))) {
-             // Refresh phase pointers for the current loop iteration
-            currentPhase = newState.challengeOrBlockPhase!;
-            possibleResponders = currentPhase.possibleResponses;
-            currentResponses = currentPhase.responses;
-
-            const aiRespondersThisLoop = possibleResponders.filter(p => p.isAI && !currentResponses.some(r => r.playerId === p.id));
-            const aiToAct = aiRespondersThisLoop[0]; // Process one AI at a time
+        while (currentPhaseState && currentPhaseState.possibleResponses.some(p => p.isAI && !currentPhaseState?.responses.some(r => r.playerId === p.id))) {
+            // Find the next AI who needs to respond *in the current phase state*
+            const aiToAct = currentPhaseState.possibleResponses.find(p => p.isAI && !currentPhaseState?.responses.some(r => r.playerId === p.id));
 
             if (!aiToAct) {
-                console.log("[triggerAIResponses] No more AI responders in this loop iteration.");
+                console.log("[triggerAIResponses] No more AI responders in this loop iteration based on current phase state.");
                 break; // Should not happen if loop condition is correct, but safety break
             }
 
@@ -2051,33 +2042,31 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
              if (!aiPlayerState) { // Safety check
                  console.error(`[triggerAIResponses] Error: AI Responder ${aiToAct.id} not found in state. Skipping response.`);
                  // Force allow to prevent loop?
-                 newState.challengeOrBlockPhase.responses.push({ playerId: aiToAct.id, response: 'Allow' });
+                 const updatedResponses = [...currentPhaseState.responses, { playerId: aiToAct.id, response: 'Allow' as GameResponseType }];
+                 newState.challengeOrBlockPhase = { ...currentPhaseState, responses: updatedResponses };
                  newState = logAction(newState, `[triggerAIResponses] Error: AI ${aiToAct.id} not found. Forced 'Allow'.`);
-                  // Refresh phase pointers after modifying state
-                 currentPhase = newState.challengeOrBlockPhase; // This might be null if forced allow resolves it
-                  if (currentPhase) { // Check if phase still exists
-                      possibleResponders = currentPhase.possibleResponses;
-                      currentResponses = currentPhase.responses;
-                  } else {
+                 // Refresh phase pointer after modifying state
+                 currentPhaseState = newState.challengeOrBlockPhase; // This might be null if forced allow resolves it
+                  if (!currentPhaseState) {
                       console.log("[triggerAIResponses] Phase ended after forced Allow for missing AI.");
                       break; // Phase ended
                   }
                  continue; // Try next AI
              }
-            console.log(`[triggerAIResponses] AI Responder: ${aiPlayerState.name} needs to respond to ${currentPhase.actionPlayer.name}'s claim/action ${currentPhase.action} (Stage: ${currentPhase.stage})`);
+             console.log(`[triggerAIResponses] AI Responder: ${aiPlayerState.name} needs to respond to ${currentPhaseState.actionPlayer.name}'s claim/action ${currentPhaseState.action} (Stage: ${currentPhaseState.stage})`);
 
             let decision: GameResponseType = 'Allow'; // Default
             let reasoning = 'Defaulting to Allow.';
             let decidedResponseType: 'Challenge' | 'Block' | 'Allow' = 'Allow'; // For logging/control flow
-            const validStageResponses = currentPhase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Fallback if not set
+            const validStageResponses = currentPhaseState.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Fallback if not set
 
             try {
-                console.log(`[triggerAIResponses] Getting response from AI ${aiPlayerState.name} for action/block ${currentPhase.action}`);
+                console.log(`[triggerAIResponses] Getting response from AI ${aiPlayerState.name} for action/block ${currentPhaseState.action}`);
                 // AI evaluates options based on the current stage and action
-                const actionTarget = currentPhase.targetPlayer;
-                const actionOrBlockPerformer = currentPhase.actionPlayer;
-                const actionOrBlockClaim = currentPhase.action; // The action or block being claimed/responded to
-                const stage = currentPhase.stage;
+                const actionTarget = currentPhaseState.targetPlayer;
+                const actionOrBlockPerformer = currentPhaseState.actionPlayer;
+                const actionOrBlockClaim = currentPhaseState.action; // The action or block being claimed/responded to
+                const stage = currentPhaseState.stage;
 
                  // --- AI Decision Logic ---
                 let challengeDecision = { shouldChallenge: false, reasoning: "Challenge not applicable/evaluated." };
@@ -2181,11 +2170,9 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
 
 
             // Refresh phase state *after* the response has been handled
-            currentPhase = newState.challengeOrBlockPhase; // Phase might have changed or ended
-            if (currentPhase) {
-                possibleResponders = currentPhase.possibleResponses;
-                currentResponses = currentPhase.responses;
-                 console.log(`[triggerAIResponses] Phase state after AI ${aiPlayerState.name}'s response: Stage=${currentPhase.stage}, Possible Responders=${possibleResponders.map(p=>p.name).join(',')}, Current Responses=${currentResponses.length}`);
+            currentPhaseState = newState.challengeOrBlockPhase; // Phase might have changed or ended
+            if (currentPhaseState) {
+                 console.log(`[triggerAIResponses] Phase state after AI ${aiPlayerState.name}'s response: Stage=${currentPhaseState.stage}, Possible Responders=${currentPhaseState.possibleResponses.map(p=>p.name).join(',')}, Current Responses=${currentPhaseState.responses.length}`);
             } else {
                 console.log(`[triggerAIResponses] Phase resolved after AI ${aiPlayerState.name}'s response (${decision}). Exiting response loop.`);
                 break; // Phase ended, exit loop
@@ -2877,4 +2864,3 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     return newState;
 }
-
