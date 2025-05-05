@@ -119,14 +119,12 @@ function returnCardToDeck(deck: CardType[], card: CardType): CardType[] {
 
 // Safely gets a player by ID, returns undefined if not found or gameState is invalid.
 function getPlayerById(gameState: GameState | null, playerId: string | undefined): Player | undefined {
-    if (!gameState || !playerId) {
-        // console.warn(`[getPlayerById] Called with null gameState or playerId.`); // Too noisy
+    // Add robust checks for gameState and gameState.players
+    if (!gameState || !Array.isArray(gameState.players) || !playerId) {
+        if (!gameState) console.warn("[getPlayerById] Called with null gameState.");
+        else if (!Array.isArray(gameState.players)) console.warn("[getPlayerById] Called with invalid gameState (players array missing).");
+        else if (!playerId) console.warn("[getPlayerById] Called with undefined playerId.");
         return undefined;
-    }
-    // Add check for gameState.players array
-    if (!Array.isArray(gameState.players)) {
-        console.error(`[getPlayerById] Error: gameState.players is undefined or not an array.`);
-        return undefined; // Or potentially throw an error depending on desired strictness
     }
     return gameState.players.find(p => p.id === playerId);
 }
@@ -175,32 +173,32 @@ function getNextPlayerIndex(currentIndex: number, players: Player[] | undefined)
 // Not exported, used internally. Callers assume valid state is returned.
 function isValidGameStateInternal(state: any): state is GameState {
      if (!state || typeof state !== 'object') {
-         // console.warn("[isValidGameStateInternal] State is null or not an object.");
+         console.warn("[isValidGameStateInternal] State is null or not an object.");
          return false;
      }
      if (!Array.isArray(state.players)) {
-         // console.warn("[isValidGameStateInternal] State.players is not an array.");
+         console.warn("[isValidGameStateInternal] State.players is not an array.");
          return false;
      }
      if (typeof state.currentPlayerIndex !== 'number' || !Number.isInteger(state.currentPlayerIndex) || state.currentPlayerIndex < 0) {
-         // console.warn("[isValidGameStateInternal] State.currentPlayerIndex is invalid.");
+         console.warn("[isValidGameStateInternal] State.currentPlayerIndex is invalid.");
          return false;
      }
       if (!Array.isArray(state.deck)) {
-         // console.warn("[isValidGameStateInternal] State.deck is not an array.");
+         console.warn("[isValidGameStateInternal] State.deck is not an array.");
          return false;
       }
       if (!Array.isArray(state.actionLog)) {
-          // console.warn("[isValidGameStateInternal] State.actionLog is not an array.");
+          console.warn("[isValidGameStateInternal] State.actionLog is not an array.");
          return false;
       }
       if (typeof state.treasury !== 'number' || state.treasury < 0) {
-          // console.warn("[isValidGameStateInternal] State.treasury is invalid.");
+          console.warn("[isValidGameStateInternal] State.treasury is invalid.");
           return false;
       }
       // Check player structure (basic)
       if (state.players.some((p: any) => !p || typeof p !== 'object' || typeof p.id !== 'string' || typeof p.name !== 'string' || typeof p.isAI !== 'boolean' || typeof p.money !== 'number' || !Array.isArray(p.influence))) {
-         // console.warn("[isValidGameStateInternal] Invalid player structure found.");
+         console.warn("[isValidGameStateInternal] Invalid player structure found.");
          return false;
       }
       // Add more detailed checks as needed for phases etc.
@@ -2051,7 +2049,7 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
 
 
 // Triggers AI responses during challenge/block phases. Returns the state *after* AIs have responded.
-// IMPORTANT: This function MODIFIES the state by calling handlePlayerResponse, and potentially resolveChallengeOrBlock.
+// IMPORTANT: This function MODIFIES the state by calling handlePlayerResponseLogic, and potentially resolveChallengeOrBlock.
 // Returns a valid GameState even on error.
 async function triggerAIResponses(gameState: GameState | null): Promise<GameState> {
       if (!isValidGameStateInternal(gameState)) return createErrorState("[triggerAIResponses] Error: gameState is invalid or null.");
@@ -2204,9 +2202,9 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
             newState = logAction(newState, `AI (${aiPlayerState.name}) responds: ${decision}.`); // Only log decision for brevity in game log
             console.log(`[triggerAIResponses] AI ${aiPlayerState.name} final response: ${decision}. Reasoning: ${reasoning}`);
 
-            // IMPORTANT: Update the state by calling handlePlayerResponse, which correctly modifies the phase state
+            // IMPORTANT: Update the state by calling handlePlayerResponseLogic, which correctly modifies the phase state
             // and potentially resolves the phase or sets up the next challenge/stage.
-             const stateAfterResponse = await handlePlayerResponse(newState, aiPlayerState.id, decision); // Await the handling
+             const stateAfterResponse = await handlePlayerResponseLogic(newState, aiPlayerState.id, decision); // Await the handling
               newState = stateAfterResponse; // Update newState with the result
 
 
@@ -2224,7 +2222,7 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
             // The resolution logic (handleChallengeDecision, resolveChallengeOrBlock handling challenge_block stage) handles the next steps.
             if (decidedResponseType !== 'Allow') {
                 console.log(`[triggerAIResponses] AI ${aiPlayerState.name} responded with ${decision}. Phase continues or resolves based on challenge/block logic. Exiting loop for this specific claim/stage.`);
-                // The state returned by handlePlayerResponse is the correct state to proceed from.
+                // The state returned by handlePlayerResponseLogic is the correct state to proceed from.
                 break; // Exit the loop as the phase has changed significantly or resolved for this specific claim.
             }
 
@@ -2596,17 +2594,18 @@ export async function performAction(gameState: GameState | null, playerId: strin
 
 
 // Make this async because the functions it calls (resolveChallenge/Block/etc.) are async
+// Renamed to handlePlayerResponseLogic to avoid conflict with component handler.
 // Returns a valid GameState even on error.
-export async function handlePlayerResponse(gameState: GameState | null, respondingPlayerId: string, response: GameResponseType): Promise<GameState> {
-     if (!isValidGameStateInternal(gameState)) return createErrorState(`[API handlePlayerResponse] Error: gameState is invalid or null for player ${respondingPlayerId}.`);
-    console.log(`[API handlePlayerResponse] Request: Player ${respondingPlayerId}, Response ${response}`);
+export async function handlePlayerResponseLogic(gameState: GameState | null, respondingPlayerId: string, response: GameResponseType): Promise<GameState> {
+     if (!isValidGameStateInternal(gameState)) return createErrorState(`[API handlePlayerResponseLogic] Error: gameState is invalid or null for player ${respondingPlayerId}.`);
+    console.log(`[API handlePlayerResponseLogic] Request: Player ${respondingPlayerId}, Response ${response}`);
     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const stateBeforeResponse = JSON.parse(JSON.stringify(gameState)); // For fallback
     const phase = newState.challengeOrBlockPhase; // Use current phase state
 
      // --- Input Validations ---
      if (!phase) {
-           const warnMsg = "[API handlePlayerResponse] Warning: No challenge/block phase active.";
+           const warnMsg = "[API handlePlayerResponseLogic] Warning: No challenge/block phase active.";
           console.warn(warnMsg);
          // Return state with log instead of error state, as this might be a race condition
          return logAction(newState, warnMsg);
@@ -2616,19 +2615,19 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
       const validResponsesForStage = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Default if not set
 
      if (!responderCanAct) {
-           const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} cannot respond in this phase. Possible: [${phase.possibleResponses.map(p=>p.id).join(',')}] Stage: ${phase.stage}`;
+           const warnMsg = `[API handlePlayerResponseLogic] Warning: Player ${respondingPlayerId} cannot respond in this phase. Possible: [${phase.possibleResponses.map(p=>p.id).join(',')}] Stage: ${phase.stage}`;
           console.warn(warnMsg);
          // Return state with log instead of error state
          return logAction(newState, warnMsg);
      }
     if (responderHasActed) {
-          const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} already responded.`;
+          const warnMsg = `[API handlePlayerResponseLogic] Warning: Player ${respondingPlayerId} already responded.`;
          console.warn(warnMsg);
         return logAction(newState, `${getPlayerById(newState, respondingPlayerId)?.name} has already responded.`); // Log, don't return error state
     }
     // Validate response against the specific valid responses for the current stage
      if (!validResponsesForStage.includes(response)) {
-          const warnMsg = `[API handlePlayerResponse] Invalid response '${response}' for current stage '${phase.stage}'. Valid: [${validResponsesForStage.join(', ')}]`;
+          const warnMsg = `[API handlePlayerResponseLogic] Invalid response '${response}' for current stage '${phase.stage}'. Valid: [${validResponsesForStage.join(', ')}]`;
           console.warn(warnMsg);
          // Return state with log instead of error state
           return logAction(newState, `Invalid response: ${response}.`);
@@ -2637,12 +2636,12 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
     const respondingPlayer = getPlayerById(newState, respondingPlayerId);
      if (!respondingPlayer) { // Safety check
-         const errorMsg = `[API handlePlayerResponse] Error: Responding player ${respondingPlayerId} not found.`;
+         const errorMsg = `[API handlePlayerResponseLogic] Error: Responding player ${respondingPlayerId} not found.`;
          return createErrorState(errorMsg, newState);
      }
 
     // --- Update Phase State ---
-     console.log(`[API handlePlayerResponse] Processing response ${response} from ${respondingPlayer.name} for stage ${phase.stage}`);
+     console.log(`[API handlePlayerResponseLogic] Processing response ${response} from ${respondingPlayer.name} for stage ${phase.stage}`);
      // Create a *new* responses array
      const newResponses = [...phase.responses, { playerId: respondingPlayerId, response }];
      newState.challengeOrBlockPhase = { ...phase, responses: newResponses }; // Update state immutably
@@ -2656,7 +2655,7 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
         if (response === 'Challenge') {
              // A challenge was issued. Transition to Pending Challenge Decision phase.
-             console.log(`[API handlePlayerResponse] Challenge issued by ${respondingPlayer.name}. Setting up pending challenge decision...`);
+             console.log(`[API handlePlayerResponseLogic] Challenge issued by ${respondingPlayer.name}. Setting up pending challenge decision...`);
              const challengedPlayerId = currentPhase.actionPlayer.id; // The one whose claim was challenged
              const challengedPlayer = getPlayerById(newState, challengedPlayerId);
              if (challengedPlayer) {
@@ -2673,20 +2672,20 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
                  newState = logAction(newState, `${respondingPlayer.name} challenges ${challengedPlayer.name}'s claim of ${currentPhase.action}! ${challengedPlayer.name}, do you want to proceed or retreat?`);
                   // Trigger AI decision if challenged player is AI
                  if (challengedPlayer.isAI) {
-                     console.log(`[API handlePlayerResponse] Triggering AI challenge decision for ${challengedPlayer.name}.`);
+                     console.log(`[API handlePlayerResponseLogic] Triggering AI challenge decision for ${challengedPlayer.name}.`);
                      stateAfterResponseHandling = await handleAIChallengeDecision(newState);
                  } else {
-                      console.log(`[API handlePlayerResponse] Waiting for Human (${challengedPlayer.name}) challenge decision.`);
+                      console.log(`[API handlePlayerResponseLogic] Waiting for Human (${challengedPlayer.name}) challenge decision.`);
                       stateAfterResponseHandling = newState; // Return state waiting for human
                  }
              } else {
-                  const errorMsg = `[API handlePlayerResponse] Error: Challenged player ${challengedPlayerId} not found during challenge response.`;
+                  const errorMsg = `[API handlePlayerResponseLogic] Error: Challenged player ${challengedPlayerId} not found during challenge response.`;
                   stateAfterResponseHandling = createErrorState(errorMsg, newState);
              }
 
         } else if (response.startsWith('Block')) {
             // A block was issued.
-             console.log(`[API handlePlayerResponse] Block (${response}) issued by ${respondingPlayer.name}.`);
+             console.log(`[API handlePlayerResponseLogic] Block (${response}) issued by ${respondingPlayer.name}.`);
               const blocker = getPlayerById(newState, respondingPlayerId)!; // Blocker is the responder
               const blockType = response as BlockActionType;
                // The player whose original action is being blocked comes from the currentAction context
@@ -2694,12 +2693,12 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
               const originalAction = newState.currentAction?.action;
 
                if (!originalActionPlayer || !originalAction) {
-                   const errorMsg = "[API handlePlayerResponse] Error: Cannot find original action context when handling block.";
+                   const errorMsg = "[API handlePlayerResponseLogic] Error: Cannot find original action context when handling block.";
                    stateAfterResponseHandling = createErrorState(errorMsg, newState);
                } else {
                     // Specific logic for Assassination block
                    if (blockType === 'Block Assassination') {
-                       console.log(`[API handlePlayerResponse] Contessa block claimed. Assassin must confirm or challenge.`);
+                       console.log(`[API handlePlayerResponseLogic] Contessa block claimed. Assassin must confirm or challenge.`);
                         // Clear the current challenge/block phase
                         newState.challengeOrBlockPhase = null;
                         // Set up the confirmation phase
@@ -2710,16 +2709,16 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
                          newState = logAction(newState, `${blocker.name} claims Contessa to block the assassination! ${originalActionPlayer.name}, do you challenge the Contessa claim or accept the block?`);
                          // Trigger AI decision if Assassin is AI
                          if (originalActionPlayer.isAI) {
-                             console.log(`[API handlePlayerResponse] Triggering AI assassination confirmation for ${originalActionPlayer.name}.`);
+                             console.log(`[API handlePlayerResponseLogic] Triggering AI assassination confirmation for ${originalActionPlayer.name}.`);
                              stateAfterResponseHandling = await handleAIAssassinationConfirmation(newState);
                          } else {
-                              console.log(`[API handlePlayerResponse] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
+                              console.log(`[API handlePlayerResponseLogic] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
                               stateAfterResponseHandling = newState; // Return state waiting for human
                          }
 
                    } else {
                        // Standard block handling: Set up challenge_block phase
-                       console.log(`[API handlePlayerResponse] Standard block (${blockType}). Setting up challenge_block stage.`);
+                       console.log(`[API handlePlayerResponseLogic] Standard block (${blockType}). Setting up challenge_block stage.`);
                         newState.challengeOrBlockPhase = {
                            actionPlayer: blocker, // Blocker is claiming the block card
                            action: blockType, // Claim is the block itself
@@ -2734,30 +2733,30 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
                    }
                }
         } else { // Response is 'Allow'
-            console.log(`[API handlePlayerResponse] Allow received from ${respondingPlayer.name} for stage ${currentPhase.stage}.`);
+            console.log(`[API handlePlayerResponseLogic] Allow received from ${respondingPlayer.name} for stage ${currentPhase.stage}.`);
             // Check if all responses for the *current stage* are now in
             const allResponded = currentPhase.possibleResponses.every(p => currentPhase.responses.some(r => r.playerId === p.id));
 
             if (allResponded) {
-                console.log(`[API handlePlayerResponse] All responses received for stage ${currentPhase.stage}. Resolving phase/stage...`);
+                console.log(`[API handlePlayerResponseLogic] All responses received for stage ${currentPhase.stage}. Resolving phase/stage...`);
                 stateAfterResponseHandling = await resolveChallengeOrBlock(newState); // Resolve based on collected responses
             } else {
-                console.log(`[API handlePlayerResponse] Stage ${currentPhase.stage}: Waiting for more responses...`);
+                console.log(`[API handlePlayerResponseLogic] Stage ${currentPhase.stage}: Waiting for more responses...`);
                 // Still waiting for more responses. Trigger remaining AIs if applicable for this stage.
                 const remainingResponders = currentPhase.possibleResponses.filter(p => !currentPhase.responses.some(r => r.playerId === p.id));
                 const remainingAIs = remainingResponders.filter(p => p.isAI);
                 if (remainingAIs.length > 0 && remainingAIs.length === remainingResponders.length) { // Only trigger if *only* AIs remain
-                    console.log(`[API handlePlayerResponse] All remaining responders for stage ${currentPhase.stage} are AI. Triggering...`);
+                    console.log(`[API handlePlayerResponseLogic] All remaining responders for stage ${currentPhase.stage} are AI. Triggering...`);
                     stateAfterResponseHandling = await triggerAIResponses(newState); // Trigger remaining AIs
                 } else {
-                    console.log(`[API handlePlayerResponse] Stage ${currentPhase.stage}: Waiting for human response or mixed group.`);
+                    console.log(`[API handlePlayerResponseLogic] Stage ${currentPhase.stage}: Waiting for human response or mixed group.`);
                     // If only human(s) remain, return current state and wait
                     stateAfterResponseHandling = newState;
                 }
             }
         }
     } catch (error: any) {
-          const errorMsgLog = `[API handlePlayerResponse] Critical error during response handling for ${response}: ${error.message}. Reverting. State before error: ${JSON.stringify(newState, null, 2)}`;
+          const errorMsgLog = `[API handlePlayerResponseLogic] Critical error during response handling for ${response}: ${error.message}. Reverting. State before error: ${JSON.stringify(newState, null, 2)}`;
          console.error(errorMsgLog);
          stateAfterResponseHandling = createErrorState(errorMsgLog, stateBeforeResponse); // Ensure valid state
          // Clear potentially inconsistent state (already done by createErrorState)
@@ -2765,14 +2764,14 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
     // Final Null Check and Validation (Add explicit check)
     if (!isValidGameStateInternal(stateAfterResponseHandling)) {
-        const finalErrorMsg = `[API handlePlayerResponse] stateAfterResponseHandling became null or invalid unexpectedly after processing ${response}. Reverting.`;
+        const finalErrorMsg = `[API handlePlayerResponseLogic] stateAfterResponseHandling became null or invalid unexpectedly after processing ${response}. Reverting.`;
         console.error(finalErrorMsg);
         // Attempt to return the state *before* the error happened, or a default error state
         return createErrorState(finalErrorMsg, stateBeforeResponse);
     }
 
 
-     console.log(`[API handlePlayerResponse] Finished processing response ${response}. Returning state.`);
+     console.log(`[API handlePlayerResponseLogic] Finished processing response ${response}. Returning state.`);
      return stateAfterResponseHandling;
 }
 

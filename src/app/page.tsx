@@ -1,12 +1,11 @@
-
-
 'use client';
 
 import type { ChangeEvent } from 'react'; // Import ChangeEvent
 import { useState, useEffect, useCallback } from 'react';
 import { GameBoard } from '@/components/game-board';
 import type { GameState, ActionType, CardType, GameResponseType, ChallengeDecisionType } from '@/lib/game-types';
-import { initializeGame, performAction, handlePlayerResponse, handleExchangeSelection, handleAIAction, handleForceReveal, handleChallengeDecision, handleAssassinationConfirmation, processPendingActionAfterReveal, advanceTurn } from '@/lib/game-logic'; // Added handleAssassinationConfirmation, processPendingActionAfterReveal, advanceTurn, REMOVED isValidGameState
+// Correctly import handlePlayerResponseLogic directly
+import { initializeGame, performAction, handlePlayerResponseLogic, handleExchangeSelection, handleAIAction, handleForceReveal, handleChallengeDecision, handleAssassinationConfirmation, processPendingActionAfterReveal, advanceTurn } from '@/lib/game-logic';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -40,7 +39,8 @@ export default function Home() {
        setIsProcessing(true);
        console.log("[updateGameState] Starting state update...");
        let newState: GameState | null = null; // Start as null
-       const currentState = gameState; // Capture current state for potential fallback
+       // Capture state *outside* the try block for reliable fallback
+       const currentStateForFallback = gameState ? JSON.parse(JSON.stringify(gameState)) : null;
 
        try {
            if (typeof newStateOrFn === 'function') {
@@ -54,16 +54,21 @@ export default function Home() {
                console.log("[updateGameState] State value resolved.");
            }
 
-            // The game logic functions now internally handle validation and return a valid state or error state.
-            // We just need to check if we received a state object.
-           if (!newState || typeof newState !== 'object' || !Array.isArray(newState.players) || typeof newState.currentPlayerIndex !== 'number') {
+            // Add explicit null check here
+           if (newState === null || newState === undefined) {
+             console.error("[updateGameState] Error: Received invalid (null or undefined) state from update function/promise.");
+             toast({ title: "Error", description: "Failed to update game state.", variant: "destructive" });
+             setGameState(currentStateForFallback); // Revert to state before the failed update
+             setIsProcessing(false); // Reset processing flag on error
+             return; // Prevent further processing with invalid state
+           }
+
+           // Then, check if the object structure is generally valid (basic check)
+           if (typeof newState !== 'object' || !Array.isArray(newState.players) || typeof newState.currentPlayerIndex !== 'number') {
                 const invalidStateDetails = JSON.stringify(newState); // Log the invalid state structure
-                console.error(`[updateGameState] Error: Received invalid state from update function/promise. State: ${invalidStateDetails}`);
-                toast({ title: "Error", description: "Failed to update game state (invalid state received).", variant: "destructive" });
-                // We want to show the error state, but based on the *current* state before the failed update
-                // Check if currentState is valid before using it
-                 const fallbackState = currentState && typeof currentState === 'object' && Array.isArray(currentState.players) ? currentState : null;
-                setGameState(fallbackState); // Set back to previous valid state (or null)
+                console.error(`[updateGameState] Error: Received invalid state structure from update function/promise. State: ${invalidStateDetails}`);
+                toast({ title: "Error", description: "Failed to update game state (invalid structure received).", variant: "destructive" });
+                setGameState(currentStateForFallback); // Revert to state before the failed update
                 setIsProcessing(false); // Reset processing flag on error
                 return; // Prevent further processing with invalid state
            }
@@ -90,10 +95,7 @@ export default function Home() {
        } catch (error: any) { // Catch errors during the update function execution itself
            console.error("[updateGameState] Error executing update function:", error);
            toast({ title: "Error", description: `An error occurred executing the game state update: ${error.message}`, variant: "destructive" });
-           // Don't update state on error, keep the old one
-           // Ensure the old state is valid before setting it back
-             const fallbackState = currentState && typeof currentState === 'object' && Array.isArray(currentState.players) ? currentState : null;
-            setGameState(fallbackState);
+            setGameState(currentStateForFallback); // Revert to state before the failed update
        } finally {
             console.log("[updateGameState] Finished processing state update.");
             setIsProcessing(false); // Ensure processing flag is reset
@@ -179,21 +181,22 @@ export default function Home() {
        console.log(`[handlePlayerResponse] Human response: ${response}`);
        updateGameState(async () => {
             const currentGameState = gameState; // Capture state at the start
-            console.log(`[handlePlayerResponse Callback] Calling handlePlayerResponse with ${response}...`);
+            console.log(`[handlePlayerResponse Callback] Calling handlePlayerResponseLogic with ${response}...`);
+            // Ensure gameState is passed correctly
             if (!currentGameState || typeof currentGameState !== 'object' || !Array.isArray(currentGameState.players)) { // Double check gameState within the async function
                 console.error("[handlePlayerResponse Callback] Game state became invalid, cannot handle response.");
                 return currentGameState; // Return original captured state
             }
              try {
-                const nextState = await handlePlayerResponse(currentGameState, humanPlayerId, response);
-                // handlePlayerResponse should now always return a GameState
-                // Validate the returned state (simple check)
-                if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
-                     const invalidStateDetails = JSON.stringify(nextState);
-                     console.error(`[handlePlayerResponse Callback] handlePlayerResponse from game-logic returned null/undefined or invalid state (unexpected). State: ${invalidStateDetails}`);
-                     toast({ title: "Error", description: "Response failed to process.", variant: "destructive" });
-                     return currentGameState; // Return original state if logic fails
-                }
+                 // Call the imported logic function
+                const nextState = await handlePlayerResponseLogic(currentGameState, humanPlayerId, response);
+                 // Validate the returned state (simple check)
+                 if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
+                      const invalidStateDetails = JSON.stringify(nextState);
+                      console.error(`[handlePlayerResponse Callback] handlePlayerResponse from game-logic returned null/undefined or invalid state (unexpected). State: ${invalidStateDetails}`);
+                      toast({ title: "Error", description: "Response failed to process.", variant: "destructive" });
+                      return currentGameState; // Return original captured state if logic fails
+                 }
                 console.log(`[handlePlayerResponse Callback] Returning valid nextState.`);
                 return nextState; // Return the valid new state
             } catch (error: any) {
@@ -458,7 +461,7 @@ export default function Home() {
         gameState={gameState}
         humanPlayerId={humanPlayerId}
         onAction={handlePlayerAction}
-        onResponse={handlePlayerResponse}
+        onResponse={handlePlayerResponse} // Pass the correctly named component handler
         onExchange={handlePlayerExchange} // Passes indices
         onForceReveal={handlePlayerForceReveal} // Pass the handler
         onChallengeDecision={handlePlayerChallengeDecision} // Pass new handler
@@ -484,4 +487,3 @@ export default function Home() {
     </main>
   );
 }
-
