@@ -1,5 +1,4 @@
 
-
 export type CardType = 'Duke' | 'Assassin' | 'Captain' | 'Ambassador' | 'Contessa';
 export const AllCards: CardType[] = ['Duke', 'Assassin', 'Captain', 'Ambassador', 'Contessa'];
 // Correct Portuguese rulebook says 3 of each card = 15 total.
@@ -26,6 +25,12 @@ export type GameResponseType = BlockActionType | ChallengeActionType | 'Allow'; 
 // Decision after being challenged
 export type ChallengeDecisionType = 'Proceed' | 'Retreat';
 
+// Stages for multi-step interactions (like Assassination)
+export type InteractionStage =
+  | 'challenge_action' // Initial phase: Can challenge the action claim
+  | 'block_decision'   // Target decides: Block the action or allow it
+  | 'challenge_block'; // Phase: Can challenge the block claim
+
 export interface InfluenceCard {
   type: CardType;
   revealed: boolean;
@@ -51,11 +56,13 @@ export interface GameState {
     cost?: number; // Store potential cost paid upfront (e.g., Assassinate)
   } | null;
   challengeOrBlockPhase: { // Represents the state when waiting for responses (Challenge or Block)
-    actionPlayer: Player; // The player whose claim is being challenged/blocked
-    action: ActionType | BlockActionType; // The action OR block being claimed
-    targetPlayer?: Player; // The target of the *original* action (relevant for blocking/challenge-block)
-    possibleResponses: Player[]; // Players who can challenge or block this claim
+    actionPlayer: Player; // The player whose claim is being challenged/blocked OR the original action player during block decision
+    action: ActionType | BlockActionType; // The action OR block being claimed OR the original action during block decision
+    targetPlayer?: Player; // The target of the *original* action
+    possibleResponses: Player[]; // Players who can respond in this stage
     responses: {playerId: string, response: GameResponseType}[];
+    stage?: InteractionStage; // Optional stage for multi-step actions like Assassination
+    validResponses?: GameResponseType[]; // Optional list of valid responses for the current stage
   } | null;
   pendingChallengeDecision: { // Represents state AFTER a challenge is made, before resolution
       challengedPlayerId: string;

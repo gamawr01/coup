@@ -1,6 +1,6 @@
 'use client';
 
-import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType, ChallengeDecisionType } from '@/lib/game-types';
+import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType, ChallengeDecisionType, BlockActionType } from '@/lib/game-types';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -225,7 +225,7 @@ const ResponsePrompt: React.FC<{
     onResponse: (response: GameResponseType) => void;
 }> = ({ gameState, humanPlayerId, onResponse }) => {
     const phase = gameState.challengeOrBlockPhase;
-    // Check if it's the response phase AND it's for the human player AND they haven't responded yet
+    // Check if it's the response phase AND the human is one of the possible responders AND hasn't responded yet
     if (!phase || !phase.possibleResponses.some(p => p.id === humanPlayerId) || phase.responses.some(r => r.playerId === humanPlayerId)) {
         return null;
     }
@@ -235,56 +235,69 @@ const ResponsePrompt: React.FC<{
         return null;
     }
 
-    const actionPlayer = phase.actionPlayer; // Player making the claim
-    const actionOrBlock = phase.action; // The claim being made (action or block)
-    const targetPlayer = phase.targetPlayer; // Original action target (if block)
+    const claimer = phase.actionPlayer; // Player making the current claim (action or block)
+    const claim = phase.action; // The action OR block being claimed
+    const originalActionTarget = phase.targetPlayer; // Original action target (if applicable)
+    const stage = phase.stage || 'challenge_action'; // Default to challenge_action if stage not set
+    const validResponses = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination']; // Possible responses for this stage
 
-    // Determine if the current claim is blockable by the human
-    const originalActionType = actionOrBlock.startsWith('Block ') ? null : (actionOrBlock as ActionType);
-    const blockTypeForOriginalAction = originalActionType ? getBlockTypeForAction(originalActionType) : null;
-    const canBlockAction = blockTypeForOriginalAction &&
-                           (originalActionType === 'Foreign Aid' || targetPlayer?.id === humanPlayerId);
 
-    // Determine if the current claim is challengeable
-    const canChallengeClaim = getCardForAction(actionOrBlock) !== null;
+    let promptText = "";
+    let title = "Response Required!";
 
-    let promptText = `${actionPlayer.name} claims ${actionOrBlock}`;
-     if (actionOrBlock === 'Assassinate' || actionOrBlock === 'Steal' || actionOrBlock === 'Coup') {
-        if (targetPlayer) {
-             promptText += ` targeting ${targetPlayer.id === humanPlayerId ? 'You' : targetPlayer.name}.`;
-        }
-     } else if (actionOrBlock.startsWith('Block ')) {
-          // The 'actionPlayer' is the blocker, 'targetPlayer' is the original action taker
-          const blockerName = actionPlayer.name;
-          const originalActionTaker = targetPlayer?.name || 'Unknown';
-          const originalAction = getActionFromBlock(actionOrBlock as BlockActionType);
-          promptText = `${blockerName} claims to block ${originalActionTaker}'s ${originalAction}.`;
-     } else {
-         promptText += '.';
-     }
-     promptText += " What do you do?";
+     switch (stage) {
+        case 'challenge_action':
+            // Someone claimed an action (e.g., Tax, Steal, Assassinate, Foreign Aid, Exchange)
+            promptText = `${claimer.name} claims ${claim}`;
+            if (originalActionTarget) {
+                promptText += ` targeting ${originalActionTarget.id === humanPlayerId ? 'You' : originalActionTarget.name}.`;
+            } else {
+                promptText += ".";
+            }
+             promptText += " What do you do?";
+            break;
+         case 'block_decision':
+             // Specifically for Assassination: Target (human) decides whether to block or allow
+             title = "Block or Allow?";
+             promptText = `${claimer.name} is attempting to Assassinate You. Do you claim Contessa to block, or allow the assassination?`;
+             break;
+        case 'challenge_block':
+            // Someone claimed a block (e.g., Block Foreign Aid, Block Stealing, Block Assassination)
+            const blockerName = claimer.name; // actionPlayer is the blocker in this stage
+            const originalActionTaker = originalActionTarget?.name || 'Unknown'; // targetPlayer is the original action taker
+            const originalAction = getActionFromBlock(claim as BlockActionType); // Get the action that was blocked
+             promptText = `${blockerName} claims to ${claim} against ${originalActionTaker}'s ${originalAction}. Do you challenge their claim?`;
+            break;
+        default:
+             promptText = `${claimer.name} claims ${claim}. What do you do?`; // Fallback
+    }
 
 
     return (
         <Card className="mt-4 border-primary border-2 shadow-lg">
             <CardHeader>
-                <CardTitle>Response Required!</CardTitle>
+                <CardTitle>{title}</CardTitle>
                 <CardDescription>{promptText}</CardDescription>
             </CardHeader>
-            <CardContent className="flex gap-2 justify-center">
-                <Button onClick={() => onResponse('Allow')} variant="secondary">
-                    <Check className="w-4 h-4 mr-1" /> Allow
-                </Button>
-                {canChallengeClaim && (
-                    <Button onClick={() => onResponse('Challenge')} variant="destructive">
-                        <HelpCircle className="w-4 h-4 mr-1" /> Challenge Claim
+            <CardContent className="flex gap-2 justify-center flex-wrap">
+                 {/* Always show Allow if it's a valid response */}
+                 {validResponses.includes('Allow') && (
+                    <Button onClick={() => onResponse('Allow')} variant="secondary">
+                        <Check className="w-4 h-4 mr-1" /> Allow
                     </Button>
-                )}
-                {canBlockAction && blockTypeForOriginalAction && (
-                    <Button onClick={() => onResponse(blockTypeForOriginalAction)} variant="outline">
-                        <Ban className="w-4 h-4 mr-1" /> {blockTypeForOriginalAction}
-                    </Button>
-                )}
+                 )}
+                 {/* Show Challenge if it's a valid response */}
+                 {validResponses.includes('Challenge') && (
+                     <Button onClick={() => onResponse('Challenge')} variant="destructive">
+                         <HelpCircle className="w-4 h-4 mr-1" /> Challenge Claim
+                     </Button>
+                 )}
+                 {/* Show relevant Block button(s) if valid */}
+                 {validResponses.filter(r => r.startsWith('Block')).map(blockResponse => (
+                     <Button key={blockResponse} onClick={() => onResponse(blockResponse)} variant="outline">
+                         <Ban className="w-4 h-4 mr-1" /> {blockResponse}
+                     </Button>
+                 ))}
             </CardContent>
         </Card>
     );
@@ -372,22 +385,24 @@ const ForcedRevealPrompt: React.FC<{
     // This requires game logic to set a specific flag, e.g., `playerNeedsToReveal: playerId`
     // For now, we'll keep the simplified/less reliable log check as placeholder
     const player = gameState.players.find(p => p.id === humanPlayerId);
-    const needsToReveal = player && player.influence.some(c => !c.revealed); // Player must have cards
+
 
     // Example of how a dedicated flag would work:
     // const needsToReveal = gameState.playerNeedsToReveal === humanPlayerId;
 
-    // Placeholder log check (less reliable):
+    // Placeholder log check (less reliable - NEEDS REPLACEMENT WITH DEDICATED FLAG):
      const lastLog = gameState.actionLog[gameState.actionLog.length - 1] || "";
      const requiresHumanRevealBasedOnLog = player && player.influence.some(c => !c.revealed) &&
                                  (lastLog.includes(`${player.name} loses the challenge and must reveal influence`) ||
                                   lastLog.includes(`${player.name} loses the block challenge and must reveal influence`) ||
-                                  lastLog.includes(`performs a Coup against ${player.name}`) || // Coup forces reveal *before* log usually
-                                  lastLog.includes(`Assassination against ${player.name} succeeds`)); // Assassination forces reveal *before* log usually
-                                  // We need a better flag in game state!
+                                   // Needs better triggers - Coup/Assassinate results aren't always the *very* last log entry
+                                   // before the reveal is needed. Relying on logs is fragile.
+                                  lastLog.includes(`performs a Coup against ${player.name}`) ||
+                                  lastLog.includes(`Assassination against ${player.name} succeeds`));
+                                  // We need a better flag in game state! e.g., gameState.playerNeedsReveal: playerId
 
     // Combine checks (replace with proper flag check when implemented)
-     if (!player || !requiresHumanRevealBasedOnLog) {
+     if (!player || !requiresHumanRevealBasedOnLog) { // Replace requiresHumanRevealBasedOnLog with flag check
          return null;
      }
 
@@ -472,8 +487,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
     const isHumanResponding = gameState.challengeOrBlockPhase?.possibleResponses.some(p => p.id === humanPlayerId) && !gameState.challengeOrBlockPhase?.responses.some(r => r.playerId === humanPlayerId);
     const isHumanExchanging = gameState.pendingExchange?.player.id === humanPlayerId;
     const isHumanDecidingChallenge = gameState.pendingChallengeDecision?.challengedPlayerId === humanPlayerId;
-    // Placeholder for forced reveal trigger
-     const isHumanForcedToReveal = false; // Replace with actual flag check later
+    // Placeholder for forced reveal trigger - Needs gameState flag
+     const isHumanForcedToReveal = false; // Replace with actual flag check later: gameState.playerNeedsReveal === humanPlayerId;
 
 
     return (
@@ -523,3 +538,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
     );
 };
 
+// Helper to get original action if a block is claimed
+function getActionFromBlock(block: BlockActionType): ActionType | null {
+    switch (block) {
+       case 'Block Foreign Aid': return 'Foreign Aid';
+       case 'Block Stealing': return 'Steal';
+       case 'Block Assassination': return 'Assassinate';
+       default: return null;
+   }
+}
