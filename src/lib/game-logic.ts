@@ -1,4 +1,5 @@
 
+
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType, ChallengeDecisionType, InteractionStage } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
@@ -1101,22 +1102,6 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
     if (decision === 'Retreat') {
         console.log(`[handleChallengeDecision] ${challengedPlayer.name} retreats. Action/Block fails.`);
         newState = logAction(newState, `${challengedPlayer.name} retreats. Their claim of ${pendingDecision.actionOrBlock} fails.`);
-
-        // Refund cost if the retreated action had one (e.g., Assassinate) - Check original action context
-        // Rulebook says cost is NOT refunded, but game might be simpler if it is? Reverting to rulebook logic: NO REFUND.
-        // const originalActionCost = newState.currentAction?.cost;
-        // const wasOriginalAction = newState.currentAction?.player.id === challengedPlayerId && newState.currentAction?.action === pendingDecision.actionOrBlock;
-
-        // if (originalActionCost && wasOriginalAction) {
-        //     const playerIndex = newState.players.findIndex(p => p.id === challengedPlayerId);
-        //     if (playerIndex !== -1) {
-        //         const newMoney = newState.players[playerIndex].money + originalActionCost;
-        //         newState.players[playerIndex] = { ...newState.players[playerIndex], money: newMoney };
-        //         newState.treasury -= originalActionCost;
-        //         newState = logAction(newState, `${challengedPlayer.name} is refunded ${originalActionCost} coins for the retreated action.`);
-        //         console.log(`[handleChallengeDecision] Refunded ${originalActionCost} to ${challengedPlayer.name}.`);
-        //     }
-        // }
 
         // If a BLOCK was challenged and retreated, the original action proceeds
         if (pendingDecision.actionOrBlock.startsWith('Block ')) {
@@ -2731,11 +2716,12 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
          // Clear potentially inconsistent state (already done by createErrorState)
     }
 
-    // Final Null Check (Although functions should now always return a state)
-    if (!stateAfterResponseHandling || typeof stateAfterResponseHandling.players === 'undefined') {
+    // Final Null Check and Validation (Add explicit check)
+    if (!stateAfterResponseHandling || typeof stateAfterResponseHandling !== 'object' || !Array.isArray(stateAfterResponseHandling.players)) {
         const finalErrorMsg = `[API handlePlayerResponse] stateAfterResponseHandling became null or invalid unexpectedly after processing ${response}. Reverting.`;
         console.error(finalErrorMsg);
-        stateAfterResponseHandling = createErrorState(finalErrorMsg, stateBeforeResponse); // Ensure valid state
+        // Attempt to return the state *before* the error happened, or a default error state
+        return createErrorState(finalErrorMsg, stateBeforeResponse);
     }
 
 
