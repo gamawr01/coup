@@ -1,5 +1,4 @@
 
-
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType, ChallengeDecisionType, InteractionStage } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
@@ -757,52 +756,59 @@ async function initiateExchange(gameState: GameState | null, player: Player): Pr
 }
 
 
-async function completeExchange(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState> {
+async function completeExchange(gameState: GameState | null, playerId: string, cardsToKeepIndices: number[]): Promise<GameState> {
     if (!gameState) return createErrorState(`[completeExchange] Error: gameState is null for player ${playerId}.`);
-    console.log(`[completeExchange] Player ${playerId} completes exchange, keeping: ${cardsToKeep.join(', ')}.`);
+    const stateBeforeComplete = JSON.parse(JSON.stringify(gameState)); // Fallback
     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const playerIndex = newState.players.findIndex(p => p.id === playerId);
     const exchangeInfo = newState.pendingExchange;
 
     if (playerIndex === -1 || !exchangeInfo || exchangeInfo.player.id !== playerId) {
         const errorMsg = `[completeExchange] Invalid state for completing exchange. Phase: ${JSON.stringify(exchangeInfo)}`;
-         // Attempt to clear invalid phase and return error state
-         const stateWithError = logAction(newState, errorMsg);
-         if(stateWithError) stateWithError.pendingExchange = null;
-         return stateWithError || createErrorState(errorMsg, gameState); // Return error state or fallback
+        const stateWithError = logAction(newState, errorMsg);
+        if (stateWithError) stateWithError.pendingExchange = null;
+        return stateWithError || createErrorState(errorMsg, gameState); // Return error state or fallback
     }
-    const player = newState.players[playerIndex];
 
+    const player = newState.players[playerIndex];
+    const cardsToChooseFrom = exchangeInfo.cardsToChoose;
     const originalUnrevealedCount = player.influence.filter(c => !c.revealed).length;
 
-    if (cardsToKeep.length !== originalUnrevealedCount) {
-        const errorMsg = `[completeExchange] Exchange error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${originalUnrevealedCount}. Cards chosen: ${cardsToKeep.join(',')}. Cards available: ${exchangeInfo.cardsToChoose.join(',')}`;
+    if (cardsToKeepIndices.length !== originalUnrevealedCount) {
+        const errorMsg = `[completeExchange] Exchange error: Player ${playerId} selected ${cardsToKeepIndices.length} cards, but needs ${originalUnrevealedCount}. Indices chosen: ${cardsToKeepIndices.join(',')}. Cards available: ${cardsToChooseFrom.join(',')}`;
         console.error(errorMsg);
-         newState = logAction(newState, `Error: ${player.name} did not select the correct number of cards (${originalUnrevealedCount}) for exchange. Selection cancelled.`);
-         // Don't advance turn, let player retry? Or handle error more gracefully.
-         // For now, clear pending state to avoid getting stuck.
-         newState.pendingExchange = null;
-         // Maybe force turn advance to prevent deadlock?
-         // return await advanceTurn(newState);
-         return newState; // Return state without advancing, UI should handle retry
+        newState = logAction(newState, `Error: ${player.name} did not select the correct number of cards (${originalUnrevealedCount}) for exchange. Selection cancelled.`);
+        newState.pendingExchange = null;
+        return newState; // Return state without advancing, UI should handle retry
     }
 
-     // Create a mutable copy of cardsToKeep to handle duplicates correctly
-     let mutableCardsToKeep = [...cardsToKeep];
-     const cardsToReturn = exchangeInfo.cardsToChoose.filter(card => {
-        const index = mutableCardsToKeep.indexOf(card);
-        if (index > -1) {
-            mutableCardsToKeep.splice(index, 1); // Remove one instance if found in cardsToKeep
-            return false; // Don't return this card
+     // Validate indices
+     if (cardsToKeepIndices.some(index => index < 0 || index >= cardsToChooseFrom.length)) {
+        const errorMsg = `[completeExchange] Exchange error: Player ${playerId} selected invalid index. Indices: ${cardsToKeepIndices.join(',')}. Max index: ${cardsToChooseFrom.length - 1}`;
+        console.error(errorMsg);
+        newState = logAction(newState, `Error: ${player.name} selected invalid card index for exchange. Selection cancelled.`);
+        newState.pendingExchange = null;
+        return newState;
+     }
+
+     // --- Logic using indices ---
+     const cardsToKeep: CardType[] = cardsToKeepIndices.map(index => cardsToChooseFrom[index]);
+     console.log(`[completeExchange] Player ${playerId} completes exchange, keeping indices [${cardsToKeepIndices.join(', ')}] corresponding to cards [${cardsToKeep.join(', ')}].`);
+
+
+    // Find cards to return: Iterate through original indices, if index not in cardsToKeepIndices, add the card to return list.
+    const cardsToReturn: CardType[] = [];
+    for (let i = 0; i < cardsToChooseFrom.length; i++) {
+        if (!cardsToKeepIndices.includes(i)) {
+            cardsToReturn.push(cardsToChooseFrom[i]);
         }
-        return true; // Return this card if not found in cardsToKeep
-    });
-     console.log(`[completeExchange] Cards returned to deck: ${cardsToReturn.join(', ')}.`);
+    }
+    console.log(`[completeExchange] Cards returned to deck: ${cardsToReturn.join(', ')}.`);
 
 
     // Update player influence
     const revealedInfluence = player.influence.filter(c => c.revealed);
-    const newUnrevealedInfluence: InfluenceCard[] = cardsToKeep.map(type => ({ type, revealed: false })); // Use the original cardsToKeep for setting influence
+    const newUnrevealedInfluence: InfluenceCard[] = cardsToKeep.map(type => ({ type, revealed: false })); // Use the mapped card types
     const newPlayerInfluence = [...revealedInfluence, ...newUnrevealedInfluence];
     newState.players[playerIndex] = { ...player, influence: newPlayerInfluence };
 
@@ -1110,7 +1116,7 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
                  if (originalAction === 'Assassinate' && originalTargetPlayer) {
                      newState = logAction(newState, `Assassination against ${originalTargetPlayer.name} proceeds.`);
                      newState = await setPlayerNeedsToReveal(newState, originalTargetPlayer.id); // Await reveal handling
-                      // Turn advances after reveal is handled
+                      // Turn advances after target reveal
                  } else {
                       newState = await executeSuccessfulAction(newState, originalActionPlayer, originalAction, originalTargetPlayer);
                  }
@@ -1319,7 +1325,7 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
 }
 
 
-async function processPendingActionAfterReveal(gameState: GameState): Promise<GameState> {
+export async function processPendingActionAfterReveal(gameState: GameState): Promise<GameState> {
     if (!gameState || !gameState.pendingActionAfterReveal) {
         console.log("[processPendingActionAfterReveal] No pending action found.");
         return gameState; // No pending action
@@ -1562,7 +1568,7 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
 
 
 
-async function advanceTurn(gameState: GameState | null): Promise<GameState> {
+export async function advanceTurn(gameState: GameState | null): Promise<GameState> {
     console.log("[advanceTurn] Advancing turn...");
     if (!gameState) {
         const errorMsg = "[advanceTurn] Error: gameState is null.";
@@ -2246,16 +2252,20 @@ async function handleAIExchange(gameState: GameState | null): Promise<GameState>
      // TODO: Enhance this with LLM reasoning if desired - would need a new flow
      const cardPreference: CardType[] = ['Duke', 'Contessa', 'Assassin', 'Captain', 'Ambassador']; // Example preference
 
-     // Sort available cards by preference
-     const sortedChoices = [...cardsToChooseFrom].sort((a, b) => cardPreference.indexOf(a) - cardPreference.indexOf(b));
+     // Sort available cards by preference, maintaining original indices
+     const choicesWithIndices = cardsToChooseFrom.map((card, index) => ({ card, index }));
+     choicesWithIndices.sort((a, b) => cardPreference.indexOf(a.card) - cardPreference.indexOf(b.card));
 
-     // Select the top 'cardsToKeepCount' cards from the sorted list
-     const cardsToKeep = sortedChoices.slice(0, cardsToKeepCount);
-     console.log(`[handleAIExchange] AI ${aiPlayer.name} chose to keep: ${cardsToKeep.join(', ')}.`);
+
+     // Select the indices of the top 'cardsToKeepCount' cards from the sorted list
+     const indicesToKeep = choicesWithIndices.slice(0, cardsToKeepCount).map(item => item.index);
+      const cardsKept = indicesToKeep.map(index => cardsToChooseFrom[index]);
+     console.log(`[handleAIExchange] AI ${aiPlayer.name} chose to keep indices: [${indicesToKeep.join(', ')}] (${cardsKept.join(', ')})`);
+
 
     try {
-        newState = logAction(newState, `AI (${aiPlayer.name}) chooses [${cardsToKeep.join(', ')}] for Exchange.`);
-        const stateAfterCompletion = await completeExchange(newState, aiPlayer.id, cardsToKeep); // await completion
+        newState = logAction(newState, `AI (${aiPlayer.name}) chooses [${cardsKept.join(', ')}] for Exchange.`);
+        const stateAfterCompletion = await completeExchange(newState, aiPlayer.id, indicesToKeep); // await completion using indices
          newState = stateAfterCompletion; // Update state
     } catch (error: any) {
          const errorMsg = `[handleAIExchange] Error during completeExchange: ${error.message}. Reverting exchange.`;
@@ -2730,9 +2740,9 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
 // Make this async because it calls completeExchange which is async
 // Returns a valid GameState even on error.
-export async function handleExchangeSelection(gameState: GameState | null, playerId: string, cardsToKeep: CardType[]): Promise<GameState> {
+export async function handleExchangeSelection(gameState: GameState | null, playerId: string, cardsToKeepIndices: number[]): Promise<GameState> {
       if (!gameState) return createErrorState(`[API handleExchangeSelection] Error: gameState is null for player ${playerId}.`);
-     console.log(`[API handleExchangeSelection] Request: Player ${playerId}, Cards ${cardsToKeep.join(', ')}`);
+     console.log(`[API handleExchangeSelection] Request: Player ${playerId}, Card Indices ${cardsToKeepIndices.join(', ')}`);
     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
     const stateBeforeExchange = JSON.parse(JSON.stringify(gameState)); // Fallback
     const player = getPlayerById(newState, playerId);
@@ -2757,31 +2767,28 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
          return createErrorState(warnMsg, newState); // Should not happen if logic is correct
      }
       const requiredCount = player.influence.filter(c => !c.revealed).length;
-     if (cardsToKeep.length !== requiredCount) {
-           const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${requiredCount}.`;
+     if (cardsToKeepIndices.length !== requiredCount) {
+           const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected ${cardsToKeepIndices.length} cards, but needs ${requiredCount}. Indices: ${cardsToKeepIndices.join(',')}`;
           console.warn(warnMsg);
          return createErrorState(warnMsg, newState);
      }
-      // Verify selected cards are from the available choices
-      let tempCardsToKeep = [...cardsToKeep];
-      let tempCardsToChoose = [...exchangeInfo.cardsToChoose] // Copy choices
-      let validSelection = true;
-      for(const card of cardsToKeep) {
-           const indexInChoices = tempCardsToChoose.indexOf(card);
-           if(indexInChoices === -1) {
-               validSelection = false;
-               const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected invalid card: ${card}. Choices were: ${exchangeInfo.cardsToChoose.join(',')}`;
-               console.warn(warnMsg);
-               return createErrorState(warnMsg, newState);
-           }
-           tempCardsToChoose.splice(indexInChoices, 1); // Remove the card from choices to handle duplicates correctly
-      }
+      // Validate indices are within bounds and unique
+       if (cardsToKeepIndices.some(index => index < 0 || index >= exchangeInfo.cardsToChoose.length)) {
+           const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected out-of-bounds index. Indices: ${cardsToKeepIndices.join(',')}. Max index: ${exchangeInfo.cardsToChoose.length - 1}`;
+           console.warn(warnMsg);
+           return createErrorState(warnMsg, newState);
+       }
+       if (new Set(cardsToKeepIndices).size !== cardsToKeepIndices.length) {
+           const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected duplicate indices: ${cardsToKeepIndices.join(',')}.`;
+           console.warn(warnMsg);
+           return createErrorState(warnMsg, newState);
+       }
 
 
      console.log("[API handleExchangeSelection] Validation complete. Completing exchange...");
      let stateAfterExchange: GameState = newState; // Initialize
      try {
-        stateAfterExchange = await completeExchange(newState, playerId, cardsToKeep);
+        stateAfterExchange = await completeExchange(newState, playerId, cardsToKeepIndices);
      } catch(error: any) {
          const errorMsgLog = `[API handleExchangeSelection] Critical error during completeExchange: ${error.message}. Reverting.`;
         console.error(errorMsgLog);
