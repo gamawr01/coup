@@ -60,6 +60,8 @@ export function initializeGame(playerNames: string[], aiPlayerCount: number): Ga
         ];
         } else {
         console.error("[initializeGame] Not enough cards to deal initial influence!");
+        // Handle error - maybe throw or return a specific error state?
+        // For now, continue, but players will have missing cards.
         }
     });
      console.log("[initializeGame] Influence dealt.");
@@ -79,10 +81,11 @@ export function initializeGame(playerNames: string[], aiPlayerCount: number): Ga
         pendingChallengeDecision: null, // Initialize new phase
         pendingAssassinationConfirmation: null, // Initialize new phase
         pendingExchange: null,
+        playerNeedsToReveal: null, // Initialize new state
+        pendingActionAfterReveal: null, // Initialize new state
         actionLog: ['Game started!'],
         winner: null,
         needsHumanTriggerForAI: false, // Initialize flag
-        playerNeedsToReveal: null, // Initialize new state
     };
 
     initialState = logAction(initialState, `--- ${initialState.players[startingPlayerIndex].name}'s turn ---`);
@@ -110,16 +113,41 @@ function returnCardToDeck(deck: CardType[], card: CardType): CardType[] {
    return shuffleDeck(newDeck);
 }
 
+
+// --- Utility Functions with Enhanced Null Checks ---
+
+// Safely gets a player by ID, returns undefined if not found or gameState is invalid.
 function getPlayerById(gameState: GameState | null, playerId: string | undefined): Player | undefined {
-    if (!gameState || !playerId) return undefined;
+    if (!gameState || !playerId) {
+        console.warn(`[getPlayerById] Called with null gameState or playerId.`);
+        return undefined;
+    }
+    // Add check for gameState.players array
+    if (!Array.isArray(gameState.players)) {
+        console.error(`[getPlayerById] Error: gameState.players is undefined or not an array.`);
+        return undefined; // Or potentially throw an error depending on desired strictness
+    }
     return gameState.players.find(p => p.id === playerId);
 }
 
-function getActivePlayers(gameState: GameState): Player[] {
+
+// Safely gets active players, returns empty array if gameState is invalid.
+function getActivePlayers(gameState: GameState | null): Player[] {
+    if (!gameState || !Array.isArray(gameState.players)) {
+        console.error(`[getActivePlayers] Error: gameState or gameState.players is invalid.`);
+        return [];
+    }
     return gameState.players.filter(p => p.influence.some(card => !card.revealed));
 }
 
-function getNextPlayerIndex(currentIndex: number, players: Player[]): number {
+// Safely gets the next player index, returns current index on error.
+function getNextPlayerIndex(currentIndex: number, players: Player[] | undefined): number {
+    // Add check for players array
+    if (!Array.isArray(players) || players.length === 0) {
+        console.error(`[getNextPlayerIndex] Error: Invalid 'players' array provided.`);
+        return currentIndex; // Return current index as fallback
+    }
+
     const activePlayers = players.filter(p => p.influence.some(card => !card.revealed));
     if (activePlayers.length <= 1) {
          console.log("[getNextPlayerIndex] Only one or zero active players left.");
@@ -128,7 +156,9 @@ function getNextPlayerIndex(currentIndex: number, players: Player[]): number {
 
     let nextIndex = (currentIndex + 1) % players.length;
     let safetyCounter = 0; // Prevent infinite loops
-    while (!players[nextIndex]?.influence.some(card => !card.revealed)) { // Added safety check for players[nextIndex]
+
+     // Loop until we find an active player, checking player existence at each step
+    while (!players[nextIndex] || !players[nextIndex].influence.some(card => !card.revealed)) {
         nextIndex = (nextIndex + 1) % players.length;
         safetyCounter++;
         if (safetyCounter > players.length * 2) { // Increased safety margin
@@ -139,6 +169,7 @@ function getNextPlayerIndex(currentIndex: number, players: Player[]): number {
     // console.log(`[getNextPlayerIndex] Next index: ${nextIndex} (${players[nextIndex].name})`);
     return nextIndex;
 }
+
 
 
 // Helper function to safely create a GameState object with an error message
@@ -157,10 +188,11 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
         pendingChallengeDecision: null,
         pendingAssassinationConfirmation: null,
         pendingExchange: null,
+        playerNeedsToReveal: null,
+        pendingActionAfterReveal: null,
         actionLog: [],
         winner: null,
         needsHumanTriggerForAI: false,
-        playerNeedsToReveal: null,
     };
 
     let baseState: GameState;
@@ -195,6 +227,7 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
     baseState.pendingAssassinationConfirmation = null;
     baseState.pendingExchange = null;
     baseState.playerNeedsToReveal = null; // Clear this too
+    baseState.pendingActionAfterReveal = null; // Clear this too
 
     // Reset needsHumanTriggerForAI flag in error state to avoid getting stuck
     baseState.needsHumanTriggerForAI = false;
@@ -254,7 +287,7 @@ function checkForWinner(gameState: GameState | null): Player | null {
         console.warn("[checkForWinner] Called with null gameState.");
         return null;
     }
-    const activePlayers = getActivePlayers(gameState);
+    const activePlayers = getActivePlayers(gameState); // Uses safe version
     if (activePlayers.length === 1) {
         console.log(`[checkForWinner] Winner found: ${activePlayers[0].name}`);
         return activePlayers[0];
@@ -343,8 +376,8 @@ export async function handleForceReveal(gameState: GameState | null, playerId: s
      return { newState, revealedCard: revealedCardType };
 }
 
-// Helper to set the playerNeedsToReveal flag
-function setPlayerNeedsToReveal(gameState: GameState, playerId: string): GameState {
+// Helper to set the playerNeedsToReveal flag and handle immediate AI reveal
+async function setPlayerNeedsToReveal(gameState: GameState, playerId: string): Promise<GameState> {
     console.log(`[setPlayerNeedsToReveal] Setting flag for player ${playerId}`);
     let newState = { ...gameState, playerNeedsToReveal: playerId };
 
@@ -355,11 +388,12 @@ function setPlayerNeedsToReveal(gameState: GameState, playerId: string): GameSta
         // AI reveals the first available card (or maybe choose randomly?)
          const cardToReveal = player.influence.find(c => !c.revealed)?.type;
          // Use Promise.resolve to make it thenable, simulating async flow
-         return Promise.resolve(handleForceReveal(newState, playerId, cardToReveal)).then(result => result.newState);
+         const result = await handleForceReveal(newState, playerId, cardToReveal);
+         return result.newState; // Return the state AFTER the reveal
     } else {
          console.log(`[setPlayerNeedsToReveal] Player ${playerId} is Human. Waiting for UI interaction.`);
     }
-    return newState;
+    return newState; // Return state with flag set for human
 }
 
 
@@ -403,9 +437,10 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
          newState.challengeOrBlockPhase = {
             actionPlayer: player,
             action: 'Foreign Aid',
+            targetPlayer: undefined, // No target for Foreign Aid
             possibleResponses: potentialBlockers,
             responses: [],
-            stage: 'challenge_action', // Initial stage: block or allow
+            stage: 'challenge_action', // Only blocking is possible
             // Foreign Aid cannot be challenged, only blocked by Duke claim.
             validResponses: ['Allow', 'Block Foreign Aid'],
         };
@@ -450,9 +485,7 @@ async function performCoup(gameState: GameState | null, playerId: string, target
         // Coup cannot be challenged or blocked, target must reveal influence
         console.log(`[performCoup] Target ${targetId} must reveal influence.`);
         // Set the flag for the target to reveal
-        newState = setPlayerNeedsToReveal(newState, target.id);
-        // If target is AI, reveal is handled within setPlayerNeedsToReveal
-        // If target is Human, UI will prompt for reveal
+        newState = await setPlayerNeedsToReveal(newState, target.id); // Await AI reveal handling
         // Turn advances *after* reveal is handled
 
     } else {
@@ -463,7 +496,7 @@ async function performCoup(gameState: GameState | null, playerId: string, target
         return newState; // Return without advancing if failed
     }
 
-     // Don't advance turn here, it happens after the forced reveal is completed via handleForceReveal
+     // Don't advance turn here, it happens after the forced reveal is completed via handleForceReveal or processPendingActionAfterReveal
      return newState;
 }
 
@@ -486,6 +519,7 @@ async function performTax(gameState: GameState | null, playerId: string): Promis
         newState.challengeOrBlockPhase = {
             actionPlayer: player,
             action: 'Tax',
+            targetPlayer: undefined,
             possibleResponses: potentialChallengers,
             responses: [],
             stage: 'challenge_action',
@@ -528,7 +562,7 @@ async function performAssassinate(gameState: GameState | null, playerId: string,
     if (player.money < 3) {
          const errorMsg = `${player.name} cannot Assassinate (needs 3 coins).`;
          console.warn(`[performAssassinate] Insufficient funds for ${playerId}.`);
-        return logAction(newState, errorMsg);
+        return logAction(newState, errorMsg); // Return state with log, don't crash
     }
 
      // Deduct cost immediately upon attempt
@@ -538,7 +572,7 @@ async function performAssassinate(gameState: GameState | null, playerId: string,
      newState.treasury = newTreasury;
      newState = logAction(newState, `${player.name} attempts to Assassinate ${target.name} (-3 coins). Now has ${newMoney} coins.`);
      // Store cost in currentAction - Use the *updated* player state
-     newState.currentAction = { ...newState.currentAction!, player: newState.players[playerIndex], action: 'Assassinate', target, cost: 3 };
+     newState.currentAction = { player: newState.players[playerIndex], action: 'Assassinate', target, cost: 3 };
 
 
     const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
@@ -657,6 +691,7 @@ async function performExchange(gameState: GameState | null, playerId: string): P
         newState.challengeOrBlockPhase = {
             actionPlayer: player,
             action: 'Exchange',
+            targetPlayer: undefined,
             possibleResponses: potentialChallengers,
             responses: [],
             stage: 'challenge_action',
@@ -888,6 +923,8 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
                  } else {
                      console.log(`[resolveChallengeOrBlock] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
                  }
+                 // Return state waiting for confirmation
+                 return newState;
             } else {
                  // Other blocks (Foreign Aid, Steal) enter challenge_block stage
                  console.log(`[resolveChallengeOrBlock] Standard block (${blockType}). Setting up challenge_block stage.`);
@@ -1059,7 +1096,7 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
                  // For Assassination, if block fails, execute the assassination
                  if (originalAction === 'Assassinate' && originalTargetPlayer) {
                      newState = logAction(newState, `Assassination against ${originalTargetPlayer.name} proceeds.`);
-                     newState = setPlayerNeedsToReveal(newState, originalTargetPlayer.id);
+                     newState = await setPlayerNeedsToReveal(newState, originalTargetPlayer.id); // Await reveal handling
                       // Turn advances after reveal is handled
                  } else {
                       newState = await executeSuccessfulAction(newState, originalActionPlayer, originalAction, originalTargetPlayer);
@@ -1196,203 +1233,75 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
                   newState = logAction(newState, errorMsg);
                   console.error(`[executeChallengeResolution] Logic error: Cannot find unrevealed ${cardToReveal} for ${challengedPlayer.name}`);
                    // As a fallback, force reveal any unrevealed card to prevent game getting stuck
-                   newState = setPlayerNeedsToReveal(newState, challengedPlayerId);
+                   newState = await setPlayerNeedsToReveal(newState, challengedPlayerId); // Await reveal handling
              }
          }
 
          // Challenger loses influence
          newState = logAction(newState, `${challenger.name} loses the challenge and must reveal influence.`);
           console.log(`[executeChallengeResolution] Challenger ${challenger.name} must reveal.`);
-         newState = setPlayerNeedsToReveal(newState, challengerId); // Set flag for challenger to reveal
+         const stateAfterChallengerReveal = await setPlayerNeedsToReveal(newState, challengerId); // Await reveal handling
 
 
           // If challenge failed, the original action/block proceeds *after* the reveal is handled.
-          // Store the next step in a temporary variable.
-          const nextStep = {
-              type: actionOrBlock.startsWith('Block ') ? 'block_succeeds' : 'action_proceeds',
-              claimerId: challengedPlayerId, // The player whose claim was proven
-              actionOrBlock: actionOrBlock, // The claim that was proven
-              originalTargetId: originalCurrentAction?.target?.id, // Original target of the action
-              originalActionPlayerId: originalCurrentAction?.player?.id, // Player who took original action (if block was challenged)
-          };
-          // Attach this info to the state somehow or handle it after the reveal completes?
-          // Modifying advanceTurn or adding a new state phase might be complex.
-          // Let's try processing it here if the challenger reveal was immediate (AI)
-          let stateAfterChallengerReveal = newState; // Start with state after setting reveal flag
+           console.log(`[executeChallengeResolution] Challenge failed. Original claim (${actionOrBlock}) by ${challengedPlayer.name} will proceed after challenger reveal.`);
+            // Store pending action
+           newState.pendingActionAfterReveal = {
+               type: actionOrBlock.startsWith('Block ') ? 'block_succeeds' : 'action_proceeds',
+               claimerId: challengedPlayerId,
+               actionOrBlock: actionOrBlock,
+               originalTargetId: originalCurrentAction?.target?.id,
+               originalActionPlayerId: originalCurrentAction?.player?.id,
+               // Store challenger ID to check if they are eliminated after reveal
+               loserId: challengerId,
+           };
 
-          if (getPlayerById(newState, challengerId)?.isAI) {
-              // AI reveal handled within setPlayerNeedsToReveal, so the state returned *is* after reveal
-              stateAfterChallengerReveal = await Promise.resolve(setPlayerNeedsToReveal(newState, challengerId)).then(async finalState => {
-                   // Check if challenger eliminated before proceeding
-                   const challengerStillActive = getActivePlayers(finalState).some(p => p.id === challengerId);
-                   if (!challengerStillActive) {
-                       console.log(`[executeChallengeResolution] Challenger ${challenger.name} eliminated by failed challenge.`);
-                       finalState = logAction(finalState, `${challenger.name} was eliminated by the failed challenge!`);
-                       const winner = checkForWinner(finalState);
-                       if (winner) {
-                           finalState.winner = winner;
-                           finalState = logAction(finalState, `${winner.name} has won the game!`);
-                           console.log(`[executeChallengeResolution] Game Over! Winner: ${winner.name}`);
-                           return finalState;
-                       }
-                   }
-
-                  // Challenger reveal complete, now proceed with the original claim
-                  const challengedActionPlayer = getPlayerById(finalState, nextStep.claimerId); // Get updated state
-                   const originalTarget = getPlayerById(finalState, nextStep.originalTargetId);
-
-                   if (!challengedActionPlayer) {
-                       const errorMsg = `[executeChallengeResolution] Error: Challenged player ${nextStep.claimerId} not found after AI challenger reveal.`;
-                       return createErrorState(errorMsg, finalState);
-                   }
-
-                  console.log(`[executeChallengeResolution] Challenge failed. Original claim (${nextStep.actionOrBlock}) by ${challengedActionPlayer.name} proceeds.`);
-                  if (nextStep.type === 'block_succeeds') {
-                      // Block was challenged and proven true, block succeeds, original action fails
-                      const originalAction = getActionFromBlock(nextStep.actionOrBlock as BlockActionType);
-                      const originalActionPlayer = getPlayerById(finalState, nextStep.originalActionPlayerId);
-                      if (originalAction && originalActionPlayer) {
-                           finalState = logAction(finalState, `${challengedActionPlayer.name}'s block is successful. ${originalActionPlayer.name}'s ${originalAction} is cancelled.`);
-                      } else {
-                           finalState = logAction(finalState, `${challengedActionPlayer.name}'s block is successful. Original action is cancelled.`);
-                      }
-                      return await advanceTurn(finalState); // Turn advances
-                  } else { // 'action_proceeds'
-                      // Action was challenged and proven true, action proceeds
-                      // If Assassination, move to block_decision stage
-                      if (nextStep.actionOrBlock === 'Assassinate' && originalTarget) {
-                           console.log(`[executeChallengeResolution] Assassinate claim successful. Proceeding to block_decision stage.`);
-                           finalState.challengeOrBlockPhase = {
-                               actionPlayer: challengedActionPlayer, // Original action player
-                               action: 'Assassinate', // Original action
-                               targetPlayer: originalTarget, // Target
-                               possibleResponses: [originalTarget], // Only target can block
-                               responses: [],
-                               stage: 'block_decision',
-                               validResponses: ['Block Assassination', 'Allow'],
-                           };
-                           finalState = logAction(finalState, `${originalTarget.name}, do you block with Contessa or allow the Assassination?`);
-                           return await triggerAIResponses(finalState); // Trigger responses for block decision
-                      } else {
-                           return await executeSuccessfulAction(finalState, challengedActionPlayer, nextStep.actionOrBlock as ActionType, originalTarget); // Execute action
-                      }
-                  }
-              });
-          } else {
-              // Human challenger needs to reveal. Store the next step info to be processed after human reveal.
-               console.log(`[executeChallengeResolution] Human challenger ${challenger.name} needs to reveal. Action/Block will proceed after reveal.`);
-               // Need a mechanism to resume after human reveal. Add to gameState?
-               newState.pendingActionAfterReveal = { // Store pending action
-                   type: nextStep.type,
-                   claimerId: nextStep.claimerId,
-                   actionOrBlock: nextStep.actionOrBlock,
-                   originalTargetId: nextStep.originalTargetId,
-                   originalActionPlayerId: nextStep.originalActionPlayerId,
-               };
-                stateAfterChallengerReveal = newState;
-          }
-           return stateAfterChallengerReveal; // Return state waiting for reveal or after AI reveal and subsequent action
-
+           // If the challenger was AI, their reveal already happened inside setPlayerNeedsToReveal
+           // We can immediately process the pending action.
+           if (challenger.isAI) {
+                console.log("[executeChallengeResolution] AI challenger reveal complete. Processing pending action immediately.");
+                return await processPendingActionAfterReveal(stateAfterChallengerReveal); // Process the pending action
+           } else {
+                console.log("[executeChallengeResolution] Human challenger needs to reveal. Action will proceed afterwards.");
+                return stateAfterChallengerReveal; // Return state waiting for human reveal
+           }
 
      } else {
           // --- Challenge Successful (Challenged Player Bluffed) ---
          console.log(`[executeChallengeResolution] Challenge successful! ${challengedPlayer.name} bluffed ${actionOrBlock}.`);
          newState = logAction(newState, `${challengedPlayer.name} cannot prove the challenge with ${requiredCard} ${actionOrBlock === 'Block Stealing' ? `or ${getAlternateCardForStealBlock()}`: ''} and loses influence.`);
          // Challenged player loses influence because they bluffed
-         newState = setPlayerNeedsToReveal(newState, challengedPlayerId); // Set flag for challenged player
+         const stateAfterBlufferReveal = await setPlayerNeedsToReveal(newState, challengedPlayerId); // Await reveal handling
 
          // Action/Block fails because bluff was called.
           console.log(`[executeChallengeResolution] Bluff called. ${challengedPlayer.name}'s claim for ${actionOrBlock} fails.`);
 
            // Store the next step (which is usually advancing the turn, or proceeding with original action if block failed)
-           const nextStep = {
+           newState.pendingActionAfterReveal = {
                type: actionOrBlock.startsWith('Block ') ? 'block_fails_action_proceeds' : 'action_fails_turn_advances',
                originalAction: actionOrBlock.startsWith('Block ') ? getActionFromBlock(actionOrBlock as BlockActionType) : null,
                originalActionPlayerId: actionOrBlock.startsWith('Block ') ? originalCurrentAction?.player?.id : null,
                originalTargetId: actionOrBlock.startsWith('Block ') ? originalCurrentAction?.target?.id : null,
+                // Store the player who lost influence due to the bluff
+               loserId: challengedPlayerId,
+               failedClaim: actionOrBlock, // Store what claim failed
            };
 
-         let stateAfterBlufferReveal = newState; // Start with state after setting reveal flag
-
-          if (challengedPlayer.isAI) {
-               // AI reveal handled within setPlayerNeedsToReveal
-               stateAfterBlufferReveal = await Promise.resolve(setPlayerNeedsToReveal(newState, challengedPlayerId)).then(async finalState => {
-                    // Check if challenged player eliminated
-                   const challengedStillActive = getActivePlayers(finalState).some(p => p.id === challengedPlayerId);
-
-                   if(!challengedStillActive) {
-                       console.log(`[executeChallengeResolution] Challenged player ${challengedPlayer.name} eliminated by successful challenge.`);
-                       finalState = logAction(finalState, `${challengedPlayer.name} was eliminated by the successful challenge!`);
-                       const winner = checkForWinner(finalState);
-                       if (winner) {
-                            finalState.winner = winner;
-                            finalState = logAction(finalState, `${winner.name} has won the game!`);
-                            console.log(`[executeChallengeResolution] Game Over! Winner: ${winner.name}`);
-                            return finalState;
-                       }
-                   }
-
-                   // Bluffer reveal complete, now handle the consequence
-                   if (nextStep.type === 'block_fails_action_proceeds') {
-                        // Block was challenged and failed, original action proceeds
-                        const originalActionPlayer = getPlayerById(finalState, nextStep.originalActionPlayerId);
-                        const originalTarget = getPlayerById(finalState, nextStep.originalTargetId);
-                        if (nextStep.originalAction && originalActionPlayer) {
-                           finalState = logAction(finalState, `${challengedPlayer.name}'s block fails. ${originalActionPlayer.name}'s ${nextStep.originalAction} proceeds.`);
-                           // If original action was Assassination, execute it now
-                           if (nextStep.originalAction === 'Assassinate' && originalTarget) {
-                                finalState = logAction(finalState, `Assassination against ${originalTarget.name} proceeds.`);
-                                // Target needs to reveal
-                                finalState = setPlayerNeedsToReveal(finalState, originalTarget.id);
-                                // Turn advances after target reveal
-                           } else {
-                                // Execute other actions
-                                finalState = await executeSuccessfulAction(finalState, originalActionPlayer, nextStep.originalAction, originalTarget);
-                           }
-                        } else {
-                            const errorMsg = `[executeChallengeResolution] Error retrieving original action/player after failed block challenge.`;
-                            console.error(errorMsg);
-                            finalState = logAction(finalState, errorMsg);
-                            finalState = await advanceTurn(finalState);
-                        }
-                   } else { // 'action_fails_turn_advances'
-                       // Action was challenged and failed, turn advances
-                        finalState = logAction(finalState, `${challengedPlayer.name}'s ${actionOrBlock} is cancelled.`);
-                       // Refund cost according to rulebook (NO refund)
-                       // const cost = originalCurrentAction?.cost;
-                       // if (cost) { ... }
-                       finalState = await advanceTurn(finalState);
-                   }
-                   return finalState;
-               });
-          } else {
-              // Human bluffer needs to reveal. Store the next step info.
-               console.log(`[executeChallengeResolution] Human bluffer ${challengedPlayer.name} needs to reveal. Consequence will apply after reveal.`);
-                newState.pendingActionAfterReveal = { // Store pending consequence
-                   type: nextStep.type,
-                   originalAction: nextStep.originalAction,
-                   originalActionPlayerId: nextStep.originalActionPlayerId,
-                   originalTargetId: nextStep.originalTargetId,
-                   failedClaimerId: challengedPlayerId, // Store who failed the claim
-                   failedClaim: actionOrBlock, // Store what claim failed
-               };
-               stateAfterBlufferReveal = newState;
-          }
-
-           return stateAfterBlufferReveal; // Return state waiting for reveal or after AI reveal and consequence
+           // If the bluffer was AI, their reveal already happened. Process the pending action.
+           if (challengedPlayer.isAI) {
+                console.log("[executeChallengeResolution] AI bluffer reveal complete. Processing pending action immediately.");
+               return await processPendingActionAfterReveal(stateAfterBlufferReveal); // Process the pending action
+           } else {
+                console.log("[executeChallengeResolution] Human bluffer needs to reveal. Consequence will apply afterwards.");
+               return stateAfterBlufferReveal; // Return state waiting for human reveal
+           }
      }
-     // Ensure we return a valid state
-    // if (!newState || typeof newState.players === 'undefined') { // Check removed as logic returns stateAfter... variables
-    //      console.error("[executeChallengeResolution] Error: newState became invalid at end of function. Reverting.");
-    //      return createErrorState("[executeChallengeResolution] Internal error at end of function.", stateBeforeResolve);
-    // }
-    // console.log(`[executeChallengeResolution] Exiting for challenge over ${actionOrBlock}.`);
-    // return newState; // This line is likely unreachable due to returns inside AI/Human checks
 }
 
 
 async function processPendingActionAfterReveal(gameState: GameState): Promise<GameState> {
     if (!gameState || !gameState.pendingActionAfterReveal) {
+        console.log("[processPendingActionAfterReveal] No pending action found.");
         return gameState; // No pending action
     }
     console.log("[processPendingActionAfterReveal] Processing action after reveal...");
@@ -1400,19 +1309,27 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
     const pendingAction = newState.pendingActionAfterReveal;
      // Clear the pending action flag immediately
     newState.pendingActionAfterReveal = null;
+    console.log(`[processPendingActionAfterReveal] Pending action data:`, pendingAction);
 
 
-    // Check if the player who had to reveal is now eliminated
-    const revealerId = newState.playerNeedsToReveal; // This should be cleared by handleForceReveal, used here conceptually
-    // Need to know who failed the challenge or who was the challenger to check their status correctly.
-    // Let's assume playerNeedsToReveal was correctly set and cleared, and the status is reflected in the current player list.
-    // We rely on the stored info in pendingActionAfterReveal
-    const failedClaimer = pendingAction.failedClaimerId ? getPlayerById(newState, pendingAction.failedClaimerId) : null;
-    const failedClaimerActive = failedClaimer ? getActivePlayers(newState).some(p => p.id === failedClaimer.id) : true; // Assume active if info missing
+    // Check if the player who lost influence (loserId) is now eliminated
+    const loserPlayer = pendingAction.loserId ? getPlayerById(newState, pendingAction.loserId) : null;
+    const loserEliminated = loserPlayer ? !getActivePlayers(newState).some(p => p.id === pendingAction.loserId) : false;
 
-    const challengerId = pendingAction.challengerId; // Need to store this if needed
-    const challenger = challengerId ? getPlayerById(newState, challengerId) : null;
-    const challengerActive = challenger ? getActivePlayers(newState).some(p => p.id === challenger.id) : true;
+    if (loserEliminated && loserPlayer) {
+        console.log(`[processPendingActionAfterReveal] Player ${loserPlayer.name} (ID: ${pendingAction.loserId}) was eliminated by the reveal.`);
+        newState = logAction(newState, `${loserPlayer.name} was eliminated!`);
+        // Check for game winner immediately after elimination
+        const winner = checkForWinner(newState);
+        if (winner) {
+            newState.winner = winner;
+            newState = logAction(newState, `${winner.name} has won the game!`);
+            console.log(`[processPendingActionAfterReveal] Game Over! Winner: ${winner.name}`);
+            return newState; // End processing early if game over
+        }
+    } else {
+        console.log(`[processPendingActionAfterReveal] Player who lost influence (ID: ${pendingAction.loserId}) is still active or ID missing.`);
+    }
 
     // --- Resume based on stored action type ---
      switch (pendingAction.type) {
@@ -1420,7 +1337,7 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
              const claimer = getPlayerById(newState, pendingAction.claimerId);
              const originalTarget = getPlayerById(newState, pendingAction.originalTargetId);
              if (claimer) {
-                 console.log(`[processPendingActionAfterReveal] Challenger reveal complete. Original action ${pendingAction.actionOrBlock} by ${claimer.name} proceeds.`);
+                 console.log(`[processPendingActionAfterReveal] Reveal complete. Original action ${pendingAction.actionOrBlock} by ${claimer.name} proceeds.`);
                  if (pendingAction.actionOrBlock === 'Assassinate' && originalTarget) {
                       console.log(`[processPendingActionAfterReveal] Assassinate claim proceeding to block decision stage.`);
                      newState.challengeOrBlockPhase = {
@@ -1440,6 +1357,7 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
              } else {
                   const errorMsg = `[processPendingActionAfterReveal] Error: Original claimer ${pendingAction.claimerId} not found.`;
                   newState = createErrorState(errorMsg, newState);
+                  newState = await advanceTurn(newState); // Advance turn to prevent stall
              }
              break;
          }
@@ -1448,7 +1366,7 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
              const originalActionPlayer = getPlayerById(newState, pendingAction.originalActionPlayerId);
              const originalAction = getActionFromBlock(pendingAction.actionOrBlock as BlockActionType);
              if (claimer && originalActionPlayer && originalAction) {
-                 console.log(`[processPendingActionAfterReveal] Challenger reveal complete. Block ${pendingAction.actionOrBlock} by ${claimer.name} succeeds.`);
+                 console.log(`[processPendingActionAfterReveal] Reveal complete. Block ${pendingAction.actionOrBlock} by ${claimer.name} succeeds.`);
                  newState = logAction(newState, `${claimer.name}'s block is successful. ${originalActionPlayer.name}'s ${originalAction} is cancelled.`);
              } else {
                  newState = logAction(newState, `[processPendingActionAfterReveal] Block successful, original action cancelled.`);
@@ -1459,26 +1377,29 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
         case 'block_fails_action_proceeds': { // Challenge succeeded (block bluffed), original action proceeds
              const originalActionPlayer = getPlayerById(newState, pendingAction.originalActionPlayerId);
              const originalTarget = getPlayerById(newState, pendingAction.originalTargetId);
-             const failedBlocker = failedClaimer; // Renaming for clarity
+             const failedBlockerId = pendingAction.loserId; // The player who bluffed the block
+             const failedBlocker = getPlayerById(newState, failedBlockerId);
+
              if (pendingAction.originalAction && originalActionPlayer && failedBlocker) {
                  console.log(`[processPendingActionAfterReveal] Bluffer (${failedBlocker.name}) reveal complete. Original action ${pendingAction.originalAction} by ${originalActionPlayer.name} proceeds.`);
                   newState = logAction(newState, `${failedBlocker.name}'s block fails. ${originalActionPlayer.name}'s ${pendingAction.originalAction} proceeds.`);
                  if (pendingAction.originalAction === 'Assassinate' && originalTarget) {
                      newState = logAction(newState, `Assassination against ${originalTarget.name} proceeds.`);
-                     newState = setPlayerNeedsToReveal(newState, originalTarget.id);
+                     newState = await setPlayerNeedsToReveal(newState, originalTarget.id); // Await reveal handling
                       // Turn advances after target reveal
                  } else {
                      newState = await executeSuccessfulAction(newState, originalActionPlayer, pendingAction.originalAction, originalTarget);
                  }
              } else {
-                  const errorMsg = `[processPendingActionAfterReveal] Error retrieving original action/player after failed block challenge.`;
+                  const errorMsg = `[processPendingActionAfterReveal] Error retrieving original action/player/blocker after failed block challenge. ActionPlayer: ${!!originalActionPlayer}, Blocker: ${!!failedBlocker}`;
                   newState = createErrorState(errorMsg, newState);
                   newState = await advanceTurn(newState); // Advance to prevent stall
              }
              break;
          }
          case 'action_fails_turn_advances': { // Challenge succeeded (action bluffed), turn advances
-             const failedClaimerPlayer = failedClaimer; // Renaming for clarity
+             const failedClaimerId = pendingAction.loserId; // The player who bluffed the action
+             const failedClaimerPlayer = getPlayerById(newState, failedClaimerId);
              if (failedClaimerPlayer) {
                  console.log(`[processPendingActionAfterReveal] Bluffer (${failedClaimerPlayer.name}) reveal complete. Action ${pendingAction.failedClaim} cancelled.`);
                  newState = logAction(newState, `${failedClaimerPlayer.name}'s ${pendingAction.failedClaim} is cancelled.`);
@@ -1552,7 +1473,7 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
                   console.log(`[executeSuccessfulAction] Assassination success against ${currentTarget.name}. Target must reveal.`);
                  newState = logAction(newState, `Assassination against ${currentTarget.name} succeeds.`);
                  // Set flag for target reveal
-                 newState = setPlayerNeedsToReveal(newState, currentTarget.id);
+                 newState = await setPlayerNeedsToReveal(newState, currentTarget.id); // Await reveal handling
                  // Turn advances *after* reveal
 
              } else if (targetIndex !== -1 && (!targetStillActive || !currentTarget)) {
@@ -1813,9 +1734,12 @@ function getAvailableActions(player: Player, gameState: GameState): ActionType[]
 
 // Generate a simple text description of the game state for the AI
 // Include AI player's own cards for better context
-function generateGameStateDescription(gameState: GameState, aiPlayerId: string): string {
+function generateGameStateDescription(gameState: GameState | null, aiPlayerId: string): string {
+    if (!gameState) {
+      return "Error: Game state is null."; // Handle null case
+    }
     let description = "Current Game State:\n";
-    const aiPlayer = getPlayerById(gameState, aiPlayerId);
+    const aiPlayer = getPlayerById(gameState, aiPlayerId); // Uses safe version
     if (aiPlayer) {
         const unrevealedCards = aiPlayer.influence.filter(c => !c.revealed).map(c => c.type);
         const revealedCards = aiPlayer.influence.filter(c => c.revealed).map(c => c.type);
@@ -1857,17 +1781,22 @@ function generateGameStateDescription(gameState: GameState, aiPlayerId: string):
      }
       if(gameState.pendingChallengeDecision) {
           const phase = gameState.pendingChallengeDecision;
-          description += `Pending Challenge Decision: ${getPlayerById(gameState, phase.challengerId)?.name} challenged ${getPlayerById(gameState, phase.challengedPlayerId)?.name}'s claim of ${phase.actionOrBlock}. ${getPlayerById(gameState, phase.challengedPlayerId)?.name} must decide to proceed or retreat.\n`;
+          const challengerName = getPlayerById(gameState, phase.challengerId)?.name || 'Unknown';
+          const challengedName = getPlayerById(gameState, phase.challengedPlayerId)?.name || 'Unknown';
+          description += `Pending Challenge Decision: ${challengerName} challenged ${challengedName}'s claim of ${phase.actionOrBlock}. ${challengedName} must decide to proceed or retreat.\n`;
       }
        if(gameState.pendingAssassinationConfirmation) {
            const phase = gameState.pendingAssassinationConfirmation;
-            description += `Pending Assassination Confirmation: ${getPlayerById(gameState, phase.contessaPlayerId)?.name} claimed Contessa to block ${getPlayerById(gameState, phase.assassinPlayerId)?.name}'s assassination. ${getPlayerById(gameState, phase.assassinPlayerId)?.name} must decide whether to challenge the Contessa claim or accept the block.\n`;
+            const contessaName = getPlayerById(gameState, phase.contessaPlayerId)?.name || 'Unknown';
+            const assassinName = getPlayerById(gameState, phase.assassinPlayerId)?.name || 'Unknown';
+            description += `Pending Assassination Confirmation: ${contessaName} claimed Contessa to block ${assassinName}'s assassination. ${assassinName} must decide whether to challenge the Contessa claim or accept the block.\n`;
        }
      if(gameState.pendingExchange) {
           description += `Pending Exchange: ${gameState.pendingExchange.player.name} is choosing cards from [${gameState.pendingExchange.cardsToChoose.join(', ')}].\n`;
      }
       if(gameState.playerNeedsToReveal) {
-          description += `Pending Reveal: ${getPlayerById(gameState, gameState.playerNeedsToReveal)?.name} must reveal an influence card.\n`;
+          const revealerName = getPlayerById(gameState, gameState.playerNeedsToReveal)?.name || 'Unknown';
+          description += `Pending Reveal: ${revealerName} must reveal an influence card.\n`;
       }
      const logEntries = gameState.actionLog.slice(-5); // Get last 5 entries
      description += `Recent Action Log Summary (${logEntries.length} entries):\n${logEntries.map(l => `  - ${l}`).join('\n')}\n`; // Last 5 log entries
@@ -2600,7 +2529,8 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      if (!phase) {
            const warnMsg = "[API handlePlayerResponse] Warning: No challenge/block phase active.";
           console.warn(warnMsg);
-         return createErrorState(warnMsg, newState); // Use createErrorState
+         // Return state with log instead of error state, as this might be a race condition
+         return logAction(newState, warnMsg);
      }
       const responderCanAct = phase.possibleResponses.some(p => p.id === respondingPlayerId);
       const responderHasActed = phase.responses.some(r => r.playerId === respondingPlayerId);
@@ -2609,7 +2539,8 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      if (!responderCanAct) {
            const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} cannot respond in this phase. Possible: [${phase.possibleResponses.map(p=>p.id).join(',')}] Stage: ${phase.stage}`;
           console.warn(warnMsg);
-         return createErrorState(warnMsg, newState); // Use createErrorState
+         // Return state with log instead of error state
+         return logAction(newState, warnMsg);
      }
     if (responderHasActed) {
           const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} already responded.`;
@@ -2620,7 +2551,8 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      if (!validResponsesForStage.includes(response)) {
           const warnMsg = `[API handlePlayerResponse] Invalid response '${response}' for current stage '${phase.stage}'. Valid: [${validResponsesForStage.join(', ')}]`;
           console.warn(warnMsg);
-          return createErrorState(warnMsg, newState); // Use createErrorState
+         // Return state with log instead of error state
+          return logAction(newState, `Invalid response: ${response}.`);
      }
 
 
