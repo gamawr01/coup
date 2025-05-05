@@ -1,4 +1,5 @@
 
+
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType, ChallengeDecisionType, InteractionStage } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
@@ -119,7 +120,7 @@ function returnCardToDeck(deck: CardType[], card: CardType): CardType[] {
 // Safely gets a player by ID, returns undefined if not found or gameState is invalid.
 function getPlayerById(gameState: GameState | null, playerId: string | undefined): Player | undefined {
     if (!gameState || !playerId) {
-        console.warn(`[getPlayerById] Called with null gameState or playerId.`);
+        // console.warn(`[getPlayerById] Called with null gameState or playerId.`); // Too noisy
         return undefined;
     }
     // Add check for gameState.players array
@@ -134,7 +135,7 @@ function getPlayerById(gameState: GameState | null, playerId: string | undefined
 // Safely gets active players, returns empty array if gameState is invalid.
 function getActivePlayers(gameState: GameState | null): Player[] {
     if (!gameState || !Array.isArray(gameState.players)) {
-        console.error(`[getActivePlayers] Error: gameState or gameState.players is invalid.`);
+        // console.error(`[getActivePlayers] Error: gameState or gameState.players is invalid.`); // Logged too frequently
         return [];
     }
     return gameState.players.filter(p => p.influence.some(card => !card.revealed));
@@ -150,7 +151,7 @@ function getNextPlayerIndex(currentIndex: number, players: Player[] | undefined)
 
     const activePlayers = players.filter(p => p.influence.some(card => !card.revealed));
     if (activePlayers.length <= 1) {
-         console.log("[getNextPlayerIndex] Only one or zero active players left.");
+         // console.log("[getNextPlayerIndex] Only one or zero active players left."); // Too noisy
          return currentIndex; // Game might be over or only one player left
     }
 
@@ -1328,7 +1329,7 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
             return newState; // End processing early if game over
         }
     } else {
-        console.log(`[processPendingActionAfterReveal] Player who lost influence (ID: ${pendingAction.loserId}) is still active or ID missing.`);
+        // console.log(`[processPendingActionAfterReveal] Player who lost influence (ID: ${pendingAction.loserId}) is still active or ID missing.`); // Too noisy
     }
 
     // --- Resume based on stored action type ---
@@ -1693,7 +1694,7 @@ function getAvailableActions(player: Player, gameState: GameState): ActionType[]
     const actions: ActionType[] = [];
      // Check if eliminated
     if (!player.influence.some(c => !c.revealed)) {
-        console.log(`[getAvailableActions] Player ${player.name} is eliminated. No actions available.`);
+        // console.log(`[getAvailableActions] Player ${player.name} is eliminated. No actions available.`); // Too noisy
         return [];
     }
 
@@ -1724,7 +1725,7 @@ function getAvailableActions(player: Player, gameState: GameState): ActionType[]
     // Filter out actions targeting non-existent/eliminated players
     const activeOpponents = getActivePlayers(gameState).filter(p => p.id !== player.id);
      if (activeOpponents.length === 0) {
-         console.log(`[getAvailableActions] No active opponents for ${player.name}. Filtering target actions.`);
+         // console.log(`[getAvailableActions] No active opponents for ${player.name}. Filtering target actions.`); // Too noisy
         return actions.filter(a => a !== 'Coup' && a !== 'Assassinate' && a !== 'Steal');
     }
 
@@ -2828,3 +2829,5 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     return newState;
 }
+
+    
