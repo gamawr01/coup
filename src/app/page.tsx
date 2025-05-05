@@ -38,6 +38,8 @@ export default function Home() {
        setIsProcessing(true);
        console.log("[updateGameState] Starting state update...");
        let newState: GameState | null = null; // Start as null
+       const currentState = gameState; // Capture current state for potential fallback
+
        try {
            if (typeof newStateOrFn === 'function') {
                console.log("[updateGameState] Executing state update function...");
@@ -81,11 +83,12 @@ export default function Home() {
        } catch (error: any) { // Catch errors during the update function execution itself
            console.error("[updateGameState] Error executing update function:", error);
            toast({ title: "Error", description: `An error occurred executing the game state update: ${error.message}`, variant: "destructive" });
+           // Don't update state on error, keep the old one
        } finally {
             console.log("[updateGameState] Finished processing state update.");
             setIsProcessing(false); // Ensure processing flag is reset
        }
-   }, [isProcessing, toast, gameState]); // Add dependencies - include gameState for fallback cases
+   }, [isProcessing, toast, gameState]); // Added gameState to dependencies
 
   const startGame = useCallback(() => {
     if (playerName.trim() === "") {
@@ -113,7 +116,7 @@ export default function Home() {
     }
 
     // Update state with the initial setup (potentially with the flag set)
-    updateGameState(() => initialState);
+    updateGameState(initialState); // Directly pass the initial state
 
   }, [playerName, aiCount, toast, updateGameState]); // Added updateGameState dependency
 
@@ -129,28 +132,29 @@ export default function Home() {
       console.log(`[handlePlayerAction] Human action: ${action}`, targetId || '');
       // Pass an async function to updateGameState that calls performAction
       updateGameState(async () => {
+           const currentGameState = gameState; // Capture state at the start of the function
            console.log(`[handlePlayerAction Callback] Calling performAction for ${action}...`);
            // Ensure gameState is passed correctly
-           if (!gameState) {
+           if (!currentGameState) {
                 console.error("[handlePlayerAction Callback] Game state is null, cannot perform action.");
-                return gameState; // Return original state as it's the best we have
+                return currentGameState; // Return original captured state
             }
             try {
-                const nextState = await performAction(gameState, humanPlayerId, action, targetId);
+                const nextState = await performAction(currentGameState, humanPlayerId, action, targetId);
                  console.log(`[handlePlayerAction Callback] Awaited call completed.`);
                  // Validate the returned state
                  if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
                      const invalidStateDetails = JSON.stringify(nextState);
                      console.error(`[handlePlayerAction Callback] performAction returned invalid state: ${invalidStateDetails}`);
                      toast({ title: "Error", description: "Action failed to process (invalid state returned).", variant: "destructive" });
-                     return gameState; // Return original state on error, as the logic failed
+                     return currentGameState; // Return original captured state on error
                  }
                  console.log(`[handlePlayerAction Callback] Returning valid nextState.`);
                  return nextState;
             } catch (error: any) {
                  console.error(`[handlePlayerAction Callback] Error during game logic call: ${error.message}`, error);
                  toast({ title: "Error", description: `Failed to process action: ${error.message}`, variant: "destructive" });
-                 return gameState; // Return the original state on error
+                 return currentGameState; // Return the original captured state on error
             }
       });
   }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
@@ -163,58 +167,62 @@ export default function Home() {
       }
        console.log(`[handlePlayerResponse] Human response: ${response}`);
        updateGameState(async () => {
+            const currentGameState = gameState; // Capture state at the start
             console.log(`[handlePlayerResponse Callback] Calling handlePlayerResponse with ${response}...`);
-            if (!gameState) { // Double check gameState within the async function
+            if (!currentGameState) { // Double check gameState within the async function
                 console.error("[handlePlayerResponse Callback] Game state became null, cannot handle response.");
-                return gameState; // Return original state
+                return currentGameState; // Return original captured state
             }
              try {
-                const nextState = await handlePlayerResponse(gameState, humanPlayerId, response);
+                const nextState = await handlePlayerResponse(currentGameState, humanPlayerId, response);
                 // handlePlayerResponse should now always return a GameState
                 if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
-                     console.error("[handlePlayerResponse Callback] handlePlayerResponse from game-logic returned null/undefined or invalid state (unexpected).");
+                     const invalidStateDetails = JSON.stringify(nextState);
+                     console.error(`[handlePlayerResponse Callback] handlePlayerResponse from game-logic returned null/undefined or invalid state (unexpected). State: ${invalidStateDetails}`);
                      toast({ title: "Error", description: "Response failed to process.", variant: "destructive" });
-                     return gameState; // Return original state if logic fails
+                     return currentGameState; // Return original captured state if logic fails
                 }
                 console.log(`[handlePlayerResponse Callback] Returning valid nextState.`);
                 return nextState; // Return the valid new state
             } catch (error: any) {
                  console.error(`[handlePlayerResponse Callback] Error during game logic call: ${error.message}`, error);
                  toast({ title: "Error", description: `Failed to process response: ${error.message}`, variant: "destructive" });
-                 return gameState; // Return the original state on error
+                 return currentGameState; // Return the original captured state on error
             }
        });
   }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
 
 
-   const handlePlayerExchange = useCallback((cardsToKeep: CardType[]) => {
+   const handlePlayerExchange = useCallback((cardsToKeepIndices: number[]) => { // Changed to indices
       if (!gameState || isProcessing || gameState.winner) {
             console.warn(`[handlePlayerExchange] Exchange blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, winner=${!!gameState?.winner}`);
             return;
       }
-      console.log(`[handlePlayerExchange] Human exchange selection: ${cardsToKeep.join(', ')}`);
+      console.log(`[handlePlayerExchange] Human exchange selection indices: ${cardsToKeepIndices.join(', ')}`);
        // Pass an async function to updateGameState that calls handleExchangeSelection
       updateGameState(async () => { // Make sure the function passed is async
+             const currentGameState = gameState; // Capture state
             console.log(`[handlePlayerExchange Callback] Calling handleExchangeSelection...`);
              // Ensure gameState is passed correctly
-             if (!gameState) {
+             if (!currentGameState) {
                 console.error("[handlePlayerExchange Callback] Game state is null, cannot handle exchange.");
-                return gameState; // Return original state
+                return currentGameState; // Return original captured state
              }
               try {
-                 const nextState = await handleExchangeSelection(gameState, humanPlayerId, cardsToKeep);
+                 // Pass indices directly
+                 const nextState = await handleExchangeSelection(currentGameState, humanPlayerId, cardsToKeepIndices);
                   // Validate the returned state
                  if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
                      const invalidStateDetails = JSON.stringify(nextState);
                      console.error(`[handleExchangeSelection Callback] handleExchangeSelection returned invalid state: ${invalidStateDetails}`);
                      toast({ title: "Error", description: "Exchange failed to process (invalid state returned).", variant: "destructive" });
-                     return gameState; // Return original state on error
+                     return currentGameState; // Return original captured state on error
                  }
                  return nextState;
              } catch (error: any) {
                   console.error(`[handlePlayerExchange Callback] Error during game logic call: ${error.message}`, error);
                   toast({ title: "Error", description: `Failed to process exchange: ${error.message}`, variant: "destructive" });
-                  return gameState; // Return the original state on error
+                  return currentGameState; // Return the original captured state on error
              }
       });
   }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
@@ -227,20 +235,21 @@ export default function Home() {
        }
         console.log(`[handleForceReveal] Human forced reveal: ${cardToReveal}`);
         updateGameState(async () => {
+            const currentGameState = gameState; // Capture state
              console.log(`[handleForceReveal Callback] Calling handleForceReveal...`);
-             if (!gameState) {
+             if (!currentGameState) {
                  console.error("[handleForceReveal Callback] Game state is null, cannot handle forced reveal.");
-                 return gameState; // Return original state
+                 return currentGameState; // Return original captured state
              }
               try {
                  // Pass the specific card selected by the human
-                 const result = await handleForceReveal(gameState, humanPlayerId, cardToReveal);
+                 const result = await handleForceReveal(currentGameState, humanPlayerId, cardToReveal);
                   // Validate the returned state
                   if (!result || !result.newState || typeof result.newState !== 'object' || !Array.isArray(result.newState.players) || typeof result.newState.currentPlayerIndex !== 'number') {
                       const invalidStateDetails = JSON.stringify(result?.newState);
                      console.error(`[handleForceReveal Callback] handleForceReveal returned invalid state: ${invalidStateDetails}`);
                      toast({ title: "Error", description: "Reveal failed to process (invalid state returned).", variant: "destructive" });
-                     return gameState; // Return original state on error
+                     return currentGameState; // Return original captured state on error
                   }
 
                  let finalState = result.newState;
@@ -258,7 +267,7 @@ export default function Home() {
                       const invalidStateDetails = JSON.stringify(finalState);
                       console.error(`[handleForceReveal Callback] State became invalid after processing reveal/pending actions: ${invalidStateDetails}`);
                       toast({ title: "Error", description: "Error processing reveal aftermath.", variant: "destructive" });
-                      return gameState; // Return original state
+                      return currentGameState; // Return original captured state
                   }
 
                  return finalState; // Return state (might be game over, next turn, or waiting for another reveal)
@@ -266,7 +275,7 @@ export default function Home() {
              } catch (error: any) {
                   console.error(`[handleForceReveal Callback] Error during game logic call: ${error.message}`, error);
                   toast({ title: "Error", description: `Failed to process reveal: ${error.message}`, variant: "destructive" });
-                  return gameState; // Return the original state on error
+                  return currentGameState; // Return the original captured state on error
              }
         });
    }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
@@ -279,25 +288,26 @@ export default function Home() {
         }
         console.log(`[handlePlayerChallengeDecision] Human challenge decision: ${decision}`);
         updateGameState(async () => {
+            const currentGameState = gameState; // Capture state
             console.log(`[handlePlayerChallengeDecision Callback] Calling handleChallengeDecision...`);
-            if (!gameState) {
+            if (!currentGameState) {
                 console.error("[handlePlayerChallengeDecision Callback] Game state is null, cannot handle challenge decision.");
-                return gameState; // Return original state
+                return currentGameState; // Return original captured state
             }
              try {
-                 const nextState = await handleChallengeDecision(gameState, humanPlayerId, decision);
+                 const nextState = await handleChallengeDecision(currentGameState, humanPlayerId, decision);
                   // Validate the returned state
                   if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
                       const invalidStateDetails = JSON.stringify(nextState);
                       console.error(`[handlePlayerChallengeDecision Callback] handleChallengeDecision returned invalid state: ${invalidStateDetails}`);
                       toast({ title: "Error", description: "Challenge decision failed to process (invalid state returned).", variant: "destructive" });
-                      return gameState; // Return original state on error
+                      return currentGameState; // Return original captured state on error
                   }
                  return nextState;
              } catch (error: any) {
                   console.error(`[handlePlayerChallengeDecision Callback] Error during game logic call: ${error.message}`, error);
                   toast({ title: "Error", description: `Failed to process challenge decision: ${error.message}`, variant: "destructive" });
-                  return gameState; // Return the original state on error
+                  return currentGameState; // Return the original captured state on error
              }
         });
     }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
@@ -310,25 +320,26 @@ export default function Home() {
         }
         console.log(`[handlePlayerAssassinationConfirmation] Human assassin confirmation: ${decision}`);
         updateGameState(async () => {
+            const currentGameState = gameState; // Capture state
             console.log(`[handlePlayerAssassinationConfirmation Callback] Calling handleAssassinationConfirmation...`);
-            if (!gameState) {
+            if (!currentGameState) {
                 console.error("[handlePlayerAssassinationConfirmation Callback] Game state is null, cannot handle confirmation.");
-                return gameState; // Return original state
+                return currentGameState; // Return original captured state
             }
              try {
-                 const nextState = await handleAssassinationConfirmation(gameState, humanPlayerId, decision);
+                 const nextState = await handleAssassinationConfirmation(currentGameState, humanPlayerId, decision);
                   // Validate the returned state
                   if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
                       const invalidStateDetails = JSON.stringify(nextState);
                       console.error(`[handlePlayerAssassinationConfirmation Callback] handleAssassinationConfirmation returned invalid state: ${invalidStateDetails}`);
                       toast({ title: "Error", description: "Assassination confirmation failed to process (invalid state returned).", variant: "destructive" });
-                      return gameState; // Return original state on error
+                      return currentGameState; // Return original captured state on error
                   }
                  return nextState;
              } catch (error: any) {
                   console.error(`[handlePlayerAssassinationConfirmation Callback] Error during game logic call: ${error.message}`, error);
                   toast({ title: "Error", description: `Failed to process assassination confirmation: ${error.message}`, variant: "destructive" });
-                  return gameState; // Return the original state on error
+                  return currentGameState; // Return the original captured state on error
              }
         });
     }, [gameState, humanPlayerId, updateGameState, isProcessing, toast]);
@@ -350,28 +361,29 @@ export default function Home() {
         // Update the state immediately to clear the flag and show processing state
         // Then, call the actual handleAIAction function.
         updateGameState(async () => { // Make sure the function passed is async
+            const currentGameState = gameState; // Capture state
             console.log(`[handleAIActionTrigger Callback] Calling handleAIAction...`);
              // Ensure gameState is passed correctly
-            if (!gameState) {
+            if (!currentGameState) {
                 console.error("[handleAIActionTrigger Callback] Game state is null, cannot trigger AI action.");
-                return gameState; // Return original state
+                return currentGameState; // Return original captured state
             }
              try {
                   // Pass a state with the flag cleared to handleAIAction
-                 const stateForAI = { ...gameState, needsHumanTriggerForAI: false };
+                 const stateForAI = { ...currentGameState, needsHumanTriggerForAI: false };
                  const nextState = await handleAIAction(stateForAI);
                   // Validate the returned state
                   if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
                       const invalidStateDetails = JSON.stringify(nextState);
                       console.error(`[handleAIActionTrigger Callback] handleAIAction returned invalid state: ${invalidStateDetails}`);
                       toast({ title: "Error", description: "AI action failed to process (invalid state returned).", variant: "destructive" });
-                      return gameState; // Return original state on error
+                      return currentGameState; // Return original captured state on error
                   }
                  return nextState;
             } catch (error: any) {
                   console.error(`[handleAIActionTrigger Callback] Error during game logic call: ${error.message}`, error);
                   toast({ title: "Error", description: `Failed to process AI turn: ${error.message}`, variant: "destructive" });
-                  return gameState; // Return the original state on error
+                  return currentGameState; // Return the original captured state on error
             }
         });
     }, [gameState, updateGameState, isProcessing, toast]);
@@ -435,7 +447,7 @@ export default function Home() {
         humanPlayerId={humanPlayerId}
         onAction={handlePlayerAction}
         onResponse={handlePlayerResponse}
-        onExchange={handlePlayerExchange}
+        onExchange={handlePlayerExchange} // Passes indices
         onForceReveal={handlePlayerForceReveal} // Pass the handler
         onChallengeDecision={handlePlayerChallengeDecision} // Pass new handler
         onAssassinationConfirmation={handlePlayerAssassinationConfirmation} // Pass new handler
@@ -460,4 +472,3 @@ export default function Home() {
     </main>
   );
 }
-
