@@ -1,4 +1,3 @@
-
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType, ChallengeDecisionType, InteractionStage } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
@@ -77,6 +76,7 @@ export function initializeGame(playerNames: string[], aiPlayerCount: number): Ga
         currentAction: null,
         challengeOrBlockPhase: null,
         pendingChallengeDecision: null, // Initialize new phase
+        pendingAssassinationConfirmation: null, // Initialize new phase
         pendingExchange: null,
         actionLog: ['Game started!'],
         winner: null,
@@ -151,6 +151,7 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
         currentAction: null,
         challengeOrBlockPhase: null,
         pendingChallengeDecision: null,
+        pendingAssassinationConfirmation: null,
         pendingExchange: null,
         actionLog: [],
         winner: null,
@@ -189,6 +190,7 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
     baseState.currentAction = null;
     baseState.challengeOrBlockPhase = null;
     baseState.pendingChallengeDecision = null;
+    baseState.pendingAssassinationConfirmation = null;
     baseState.pendingExchange = null;
 
 
@@ -706,7 +708,7 @@ async function completeExchange(gameState: GameState | null, playerId: string, c
         }
         return true; // Return this card if not found in cardsToKeep
     });
-     console.log(`[completeExchange] Cards returned to deck: ${cardsToReturn.join(', ')}`);
+     console.log(`[completeExchange] Cards returned to deck: ${cardsToReturn.join(', ')}.`);
 
 
     // Update player influence
@@ -837,31 +839,32 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
 
     } else if (stage === 'block_decision' && blocks.length > 0) {
         // --- Handle Block (during block_decision stage for Assassination) ---
+        // Target (Contessa claimer) chose to block
          const blockerId = blocks[0].playerId; // Should be the target
          const blockType = blocks[0].response as BlockActionType; // Should be Block Assassination
-         console.log(`[resolveChallengeOrBlock] Target ${blockerId} chose to ${blockType}. Setting up challenge_block phase.`);
+         console.log(`[resolveChallengeOrBlock] Target ${blockerId} chose to ${blockType}. Setting up Assassination Confirmation Phase.`);
          const originalActionPlayer = newState.currentAction?.player; // Assassin
-         if (!originalActionPlayer) {
-              const errorMsg = "[resolveChallengeOrBlock] Error: Cannot find original Assassin player context when handling block.";
-              return createErrorState(errorMsg, newState);
-         }
-          const blocker = getPlayerById(newState, blockerId); // Target/Contessa claimer
-          if (!blocker) {
-             const errorMsg = `[resolveChallengeOrBlock] Error: Blocker ${blockerId} (target) not found.`;
+         const blocker = getPlayerById(newState, blockerId); // Target/Contessa claimer
+
+         if (!originalActionPlayer || !blocker) {
+             const errorMsg = `[resolveChallengeOrBlock] Error: Cannot find Assassin or Blocker context when handling Contessa block.`;
              return createErrorState(errorMsg, newState);
-          }
-         // Set up phase to challenge the Contessa claim
-          newState.challengeOrBlockPhase = {
-             actionPlayer: blocker, // Target/Blocker is claiming Contessa
-             action: blockType, // Claiming 'Block Assassination'
-             targetPlayer: originalActionPlayer, // Target of challenge is Assassin
-             possibleResponses: getActivePlayers(newState).filter(p => p.id !== blockerId), // Anyone else can challenge
-             responses: [],
-             stage: 'challenge_block',
-             validResponses: ['Challenge', 'Allow'],
+         }
+
+         // Instead of challenge_block, enter pendingAssassinationConfirmation
+         newState.pendingAssassinationConfirmation = {
+             assassinPlayerId: originalActionPlayer.id,
+             contessaPlayerId: blocker.id,
          };
-          newState = logAction(newState, `${blocker.name} claims Contessa to ${blockType}. Others can challenge this claim.`);
-          newState = await triggerAIResponses(newState);
+         newState = logAction(newState, `${blocker.name} claims Contessa to block the assassination! ${originalActionPlayer.name}, do you challenge the Contessa claim or accept the block?`);
+
+         // Trigger AI decision if Assassin is AI
+         if (originalActionPlayer.isAI) {
+             newState = await handleAIAssassinationConfirmation(newState);
+         } else {
+             console.log(`[resolveChallengeOrBlock] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
+         }
+         // Return state, waiting for handleAssassinationConfirmation call
 
     } else if (allows.length === phase.possibleResponses.length || phase.possibleResponses.length === 0 ) {
         // --- Handle All Allows / No Responses Possible ---
@@ -1004,6 +1007,7 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
 
     return newState;
 }
+
 
 // Extracted logic for actually resolving the challenge AFTER proceed/retreat decision
 async function executeChallengeResolution(gameState: GameState, challengedPlayerId: string, challengerId: string, actionOrBlock: ActionType | BlockActionType): Promise<GameState> {
@@ -1296,8 +1300,8 @@ async function executeSuccessfulAction(gameState: GameState | null, player: Play
              newState = await advanceTurn(newState);
             break;
         case 'Assassinate':
-             // This case is now handled within the challenge resolution logic
-             // If Assassinate gets here, it means it was allowed (not blocked or challenged)
+             // This case is now handled within the challenge resolution logic or assassination confirmation
+             // If it gets here, it means it was allowed or the block was accepted.
              if (playerIndex !== -1 && targetIndex !== -1 && targetStillActive && currentTarget) {
                  // Cost was already paid on attempt
                   console.log(`[executeSuccessfulAction] Assassination success against ${currentTarget.name}. Target must reveal.`);
@@ -1393,16 +1397,18 @@ async function advanceTurn(gameState: GameState | null): Promise<GameState> {
         newState.currentAction = null; // Ensure current action is cleared on game end
         newState.challengeOrBlockPhase = null; // Clear any lingering phase
         newState.pendingChallengeDecision = null;
+        newState.pendingAssassinationConfirmation = null;
         newState.pendingExchange = null;
         return newState; // Return immediately if game is over
     }
 
      // 2. Clear transient states
-     if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.pendingChallengeDecision || newState.currentAction) {
+     if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.pendingChallengeDecision || newState.currentAction || newState.pendingAssassinationConfirmation) {
         console.log("[advanceTurn] Clearing transient states before advancing turn.");
          newState.challengeOrBlockPhase = null;
          newState.pendingExchange = null;
          newState.pendingChallengeDecision = null;
+         newState.pendingAssassinationConfirmation = null;
          newState.currentAction = null;
      }
 
@@ -1465,7 +1471,7 @@ function getAlternateCardForStealBlock(): CardType {
 
 // Find which block corresponds to an action
 function getBlockTypeForAction(action: ActionType): BlockActionType | null {
-    switch (action) {
+     switch (action) {
         case 'Foreign Aid': return 'Block Foreign Aid';
         case 'Steal': return 'Block Stealing';
         case 'Assassinate': return 'Block Assassination';
@@ -1478,8 +1484,8 @@ function getBlockTypeForAction(action: ActionType): BlockActionType | null {
 function getActionFromBlock(block: BlockActionType): ActionType | null {
      switch (block) {
         case 'Block Foreign Aid': return 'Foreign Aid';
-        case 'Block Stealing': return 'Steal';
-        case 'Block Assassination': return 'Assassinate';
+        case 'Steal': return 'Steal';
+        case 'Assassinate': return 'Assassinate';
         default: return null;
     }
 }
@@ -1567,6 +1573,10 @@ function generateGameStateDescription(gameState: GameState, aiPlayerId: string):
           const phase = gameState.pendingChallengeDecision;
           description += `Pending Challenge Decision: ${getPlayerById(gameState, phase.challengerId)?.name} challenged ${getPlayerById(gameState, phase.challengedPlayerId)?.name}'s claim of ${phase.actionOrBlock}. ${getPlayerById(gameState, phase.challengedPlayerId)?.name} must decide to proceed or retreat.\n`;
       }
+       if(gameState.pendingAssassinationConfirmation) {
+           const phase = gameState.pendingAssassinationConfirmation;
+            description += `Pending Assassination Confirmation: ${getPlayerById(gameState, phase.contessaPlayerId)?.name} claimed Contessa to block ${getPlayerById(gameState, phase.assassinPlayerId)?.name}'s assassination. ${getPlayerById(gameState, phase.assassinPlayerId)?.name} must decide whether to challenge the Contessa claim or accept the block.\n`;
+       }
      if(gameState.pendingExchange) {
           description += `Pending Exchange: ${gameState.pendingExchange.player.name} is choosing cards from [${gameState.pendingExchange.cardsToChoose.join(', ')}].\n`;
      }
@@ -1598,8 +1608,8 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
          newState.needsHumanTriggerForAI = false; // Ensure flag is off before advancing
          return await advanceTurn(newState); // Skip turn if AI is eliminated
      }
-     if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.pendingChallengeDecision || newState.winner) {
-          const infoMsg = `[handleAIAction] AI ${aiPlayer.name}'s turn skipped: Ongoing phase or game over. Phase: ${!!newState.challengeOrBlockPhase}, Exchange: ${!!newState.pendingExchange}, ChallengeDecision: ${!!newState.pendingChallengeDecision}, Winner: ${!!newState.winner}`;
+     if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.pendingChallengeDecision || newState.winner || newState.pendingAssassinationConfirmation) {
+          const infoMsg = `[handleAIAction] AI ${aiPlayer.name}'s turn skipped: Ongoing phase or game over. Phase: ${!!newState.challengeOrBlockPhase}, Exchange: ${!!newState.pendingExchange}, ChallengeDecision: ${!!newState.pendingChallengeDecision}, AssassinationConfirm: ${!!newState.pendingAssassinationConfirmation}, Winner: ${!!newState.winner}`;
          console.log(infoMsg);
          newState.needsHumanTriggerForAI = false; // Ensure flag is off
          return newState; // Don't act if in another phase
@@ -2003,7 +2013,7 @@ async function handleAIExchange(gameState: GameState | null): Promise<GameState>
      return newState;
 }
 
-// TODO: Implement AI logic for challenge decision (Proceed vs Retreat)
+// Handle AI decision for challenged player (Proceed vs Retreat)
 async function handleAIChallengeDecision(gameState: GameState): Promise<GameState> {
     let newState = JSON.parse(JSON.stringify(gameState));
     const stateBeforeDecision = JSON.parse(JSON.stringify(gameState)); // Fallback
@@ -2057,6 +2067,69 @@ async function handleAIChallengeDecision(gameState: GameState): Promise<GameStat
     return stateAfterHandling;
 }
 
+// Handle AI decision for Assassin during Contessa block confirmation (Challenge Contessa vs Accept Block)
+async function handleAIAssassinationConfirmation(gameState: GameState): Promise<GameState> {
+    let newState = JSON.parse(JSON.stringify(gameState));
+    const stateBeforeConfirm = JSON.parse(JSON.stringify(gameState)); // Fallback
+    const confirmPhase = newState.pendingAssassinationConfirmation;
+    if (!confirmPhase) return newState; // Should not happen
+
+    const assassinPlayer = getPlayerById(newState, confirmPhase.assassinPlayerId);
+    if (!assassinPlayer || !assassinPlayer.isAI) return newState; // Not an AI Assassin or player not found
+
+    const contessaPlayer = getPlayerById(newState, confirmPhase.contessaPlayerId);
+     if (!contessaPlayer) {
+          const errorMsg = `[handleAIAssassinationConfirmation] Error: Contessa player ${confirmPhase.contessaPlayerId} not found.`;
+          return createErrorState(errorMsg, newState);
+     }
+
+    console.log(`[handleAIAssassinationConfirmation] AI Assassin (${assassinPlayer.name}) deciding whether to challenge ${contessaPlayer.name}'s Contessa claim...`);
+
+    // Use AI challenge reasoning flow
+    let challengeDecision = { shouldChallenge: false, reasoning: "Defaulting to not challenge." };
+    try {
+        challengeDecision = await aiChallengeReasoning({
+            actionOrBlock: 'Block Assassination', // Challenging the block claim
+            playerName: contessaPlayer.name,
+            targetPlayerName: assassinPlayer.name, // Original target of the block challenge is the assassin
+            aiInfluenceCards: assassinPlayer.influence.filter(c => !c.revealed).map(c => c.type),
+            opponentInfluenceCount: contessaPlayer.influence.filter(c => !c.revealed).length,
+            opponentMoney: contessaPlayer.money,
+            gameState: generateGameStateDescription(newState, assassinPlayer.id),
+            rulebook: coupRulebook,
+        });
+         newState = logAction(newState, `AI Assassin (${assassinPlayer.name}) Contessa Challenge Reasoning: ${challengeDecision.reasoning}`);
+         console.log(`[handleAIAssassinationConfirmation] AI Assassin (${assassinPlayer.name}) challenge decision: ${challengeDecision.shouldChallenge}`);
+    } catch (error: any) {
+         const errorMsg = `[handleAIAssassinationConfirmation] Error calling aiChallengeReasoning: ${error.message}. Defaulting to not challenge.`;
+         console.error(errorMsg);
+         newState = logAction(newState, errorMsg);
+         challengeDecision.shouldChallenge = false; // Ensure default on error
+    }
+
+     const decision: 'Challenge Contessa' | 'Accept Block' = challengeDecision.shouldChallenge ? 'Challenge Contessa' : 'Accept Block';
+     console.log(`[handleAIAssassinationConfirmation] AI Assassin (${assassinPlayer.name}) chose: ${decision}`);
+
+
+    // Call the handler with the AI's decision
+    let stateAfterHandling: GameState;
+    try {
+        stateAfterHandling = await handleAssassinationConfirmation(newState, assassinPlayer.id, decision);
+    } catch (error: any) {
+         const errorMsg = `[handleAIAssassinationConfirmation] Error calling handleAssassinationConfirmation: ${error.message}. Reverting.`;
+         console.error(errorMsg);
+         stateAfterHandling = createErrorState(errorMsg, stateBeforeConfirm);
+    }
+
+     // Final check
+     if (!stateAfterHandling || typeof stateAfterHandling.players === 'undefined') {
+         console.error("[handleAIAssassinationConfirmation] Error: stateAfterHandling became invalid. Reverting.");
+         return createErrorState("[handleAIAssassinationConfirmation] Internal error after handling AI confirmation.", stateBeforeConfirm);
+     }
+
+    return stateAfterHandling;
+}
+
 // --- Public API ---
 
 // Make this async because the actions it calls are async
@@ -2082,8 +2155,8 @@ export async function performAction(gameState: GameState | null, playerId: strin
          console.warn(warnMsg);
         return logAction(newState, "Game already over.");
      }
-     if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.pendingChallengeDecision) {
-          const warnMsg = "[API performAction] Warning: Action attempted during challenge/block/exchange/decision phase.";
+     if (newState.challengeOrBlockPhase || newState.pendingExchange || newState.pendingChallengeDecision || newState.pendingAssassinationConfirmation) {
+          const warnMsg = "[API performAction] Warning: Action attempted during challenge/block/exchange/decision/confirmation phase.";
          console.warn(warnMsg);
         return logAction(newState, "Cannot perform action now, waiting for response or decision.");
     }
@@ -2220,7 +2293,7 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      if (!phase) {
            const warnMsg = "[API handlePlayerResponse] Warning: No challenge/block phase active.";
           console.warn(warnMsg);
-         return logAction(newState, "Invalid response: Not in challenge/block phase.");
+         return createErrorState(warnMsg, newState); // Use createErrorState
      }
       const responderCanAct = phase.possibleResponses.some(p => p.id === respondingPlayerId);
       const responderHasActed = phase.responses.some(r => r.playerId === respondingPlayerId);
@@ -2229,18 +2302,18 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      if (!responderCanAct) {
            const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} cannot respond in this phase. Possible: [${phase.possibleResponses.map(p=>p.id).join(',')}] Stage: ${phase.stage}`;
           console.warn(warnMsg);
-         return logAction(newState, `Invalid response: Player ${getPlayerById(newState, respondingPlayerId)?.name} cannot respond now.`);
+         return createErrorState(warnMsg, newState); // Use createErrorState
      }
     if (responderHasActed) {
           const warnMsg = `[API handlePlayerResponse] Warning: Player ${respondingPlayerId} already responded.`;
          console.warn(warnMsg);
-        return logAction(newState, `${getPlayerById(newState, respondingPlayerId)?.name} has already responded.`);
+        return logAction(newState, `${getPlayerById(newState, respondingPlayerId)?.name} has already responded.`); // Log, don't return error state
     }
     // Validate response against the specific valid responses for the current stage
      if (!validResponsesForStage.includes(response)) {
           const warnMsg = `[API handlePlayerResponse] Invalid response '${response}' for current stage '${phase.stage}'. Valid: [${validResponsesForStage.join(', ')}]`;
           console.warn(warnMsg);
-          return logAction(newState, `Invalid response: '${response}'. Valid options are: ${validResponsesForStage.join(', ')}.`);
+          return createErrorState(warnMsg, newState); // Use createErrorState
      }
 
 
@@ -2251,28 +2324,28 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
          if (!getCardForAction(claim)) { // Check if claim is challengeable (has associated card)
               const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot challenge the claim '${claim}'.`;
               console.warn(warnMsg);
-             return logAction(newState, `Cannot challenge the claim '${claim}'.`);
+             return createErrorState(warnMsg, newState); // Use createErrorState
          }
      } else if (response.startsWith('Block')) {
           // Can only block if the claim was an *action* (not a block itself)
          if (typeof claim !== 'string' || claim.startsWith('Block ')) {
                const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot block a block claim ('${claim}').`;
                console.warn(warnMsg);
-              return logAction(newState, `Cannot block a block claim.`);
+              return createErrorState(warnMsg, newState); // Use createErrorState
          }
          // Check if the block type is valid for the original action
          const blockType = getBlockTypeForAction(claim as ActionType);
          if (response !== blockType) {
               const warnMsg = `[API handlePlayerResponse] Invalid response: Cannot use ${response} to block ${claim}. Expected ${blockType || 'no block'}.`;
               console.warn(warnMsg);
-              return logAction(newState, `Cannot use ${response} to block ${claim}.`);
+              return createErrorState(warnMsg, newState); // Use createErrorState
          }
          // Ensure blocker is target (if applicable) or it's Foreign Aid/Assassination
           if (claim === 'Steal' || claim === 'Assassinate') {
              if (phase.targetPlayer?.id !== respondingPlayerId) {
                   const warnMsg = `[API handlePlayerResponse] Invalid response: Only target ${phase.targetPlayer?.name} can block ${claim}.`;
                   console.warn(warnMsg);
-                 return logAction(newState, `Only the target can ${response}.`);
+                 return createErrorState(warnMsg, newState); // Use createErrorState
              }
          }
           // Foreign Aid can be blocked by anyone (if Duke claim is valid)
@@ -2329,29 +2402,51 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
 
         } else if (response.startsWith('Block')) {
             // A block was issued.
-             // If stage was 'challenge_action', this block is against the original action.
-             // If stage was 'block_decision', this block is the target deciding to block (e.g., Assassination).
-             console.log(`[API handlePlayerResponse] Block (${response}) issued by ${respondingPlayer.name}. Setting up challenge_block phase...`);
+             console.log(`[API handlePlayerResponse] Block (${response}) issued by ${respondingPlayer.name}.`);
               const blocker = getPlayerById(newState, respondingPlayerId)!; // Blocker is the responder
               const blockType = response as BlockActionType;
                // The player whose original action is being blocked comes from the currentAction context
               const originalActionPlayer = newState.currentAction?.player;
-               if (!originalActionPlayer) {
-                   const errorMsg = "[API handlePlayerResponse] Error: Cannot find original action player context when handling block.";
+              const originalAction = newState.currentAction?.action;
+
+               if (!originalActionPlayer || !originalAction) {
+                   const errorMsg = "[API handlePlayerResponse] Error: Cannot find original action context when handling block.";
                    stateAfterResponseHandling = createErrorState(errorMsg, newState);
                } else {
-                    // Set up the phase to challenge the block claim
-                    newState.challengeOrBlockPhase = {
-                       actionPlayer: blocker, // Blocker is claiming the block card
-                       action: blockType, // Claim is the block itself
-                       targetPlayer: originalActionPlayer, // Target of challenge is original action player
-                       possibleResponses: getActivePlayers(newState).filter(p => p.id !== blocker.id), // Others can challenge block
-                       responses: [],
-                       stage: 'challenge_block',
-                       validResponses: ['Challenge', 'Allow'],
-                   };
-                    newState = logAction(newState, `${blocker.name} claims to ${blockType}. Others can challenge this claim.`);
-                    stateAfterResponseHandling = await triggerAIResponses(newState); // Trigger challenges against the block
+                    // Specific logic for Assassination block
+                   if (blockType === 'Block Assassination') {
+                       console.log(`[API handlePlayerResponse] Contessa block claimed. Assassin must confirm or challenge.`);
+                        // Clear the current challenge/block phase
+                        newState.challengeOrBlockPhase = null;
+                        // Set up the confirmation phase
+                        newState.pendingAssassinationConfirmation = {
+                           assassinPlayerId: originalActionPlayer.id,
+                           contessaPlayerId: blocker.id,
+                        };
+                         newState = logAction(newState, `${blocker.name} claims Contessa to block the assassination! ${originalActionPlayer.name}, do you challenge the Contessa claim or accept the block?`);
+                         // Trigger AI decision if Assassin is AI
+                         if (originalActionPlayer.isAI) {
+                             stateAfterResponseHandling = await handleAIAssassinationConfirmation(newState);
+                         } else {
+                              console.log(`[API handlePlayerResponse] Waiting for Human Assassin (${originalActionPlayer.name}) confirmation.`);
+                              stateAfterResponseHandling = newState; // Return state waiting for human
+                         }
+
+                   } else {
+                       // Standard block handling: Set up challenge_block phase
+                       console.log(`[API handlePlayerResponse] Standard block claimed. Setting up challenge_block phase.`);
+                        newState.challengeOrBlockPhase = {
+                           actionPlayer: blocker, // Blocker is claiming the block card
+                           action: blockType, // Claim is the block itself
+                           targetPlayer: originalActionPlayer, // Target of challenge is original action player
+                           possibleResponses: getActivePlayers(newState).filter(p => p.id !== blocker.id), // Others can challenge block
+                           responses: [],
+                           stage: 'challenge_block',
+                           validResponses: ['Challenge', 'Allow'],
+                       };
+                        newState = logAction(newState, `${blocker.name} claims to ${blockType}. Others can challenge this claim.`);
+                        stateAfterResponseHandling = await triggerAIResponses(newState); // Trigger challenges against the block
+                   }
                }
         } else { // Response is 'Allow'
             console.log(`[API handlePlayerResponse] Allow received from ${respondingPlayer.name} for stage ${currentPhase.stage}.`);
@@ -2418,18 +2513,18 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
     if (!exchangeInfo || exchangeInfo.player.id !== playerId) {
            const warnMsg = "[API handleExchangeSelection] Warning: Not in exchange phase for this player.";
           console.warn(warnMsg);
-        return logAction(newState, "Not in exchange phase for this player.");
+        return createErrorState(warnMsg, newState);
     }
      if (!player.influence.some(c => !c.revealed)) {
            const warnMsg = `[API handleExchangeSelection] Warning: Player ${playerId} is eliminated.`;
           console.warn(warnMsg);
-         return logAction(newState, "You are eliminated."); // Should not happen if logic is correct
+         return createErrorState(warnMsg, newState); // Should not happen if logic is correct
      }
       const requiredCount = player.influence.filter(c => !c.revealed).length;
      if (cardsToKeep.length !== requiredCount) {
            const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected ${cardsToKeep.length} cards, but needs ${requiredCount}.`;
           console.warn(warnMsg);
-         return logAction(newState, `Error: Must select exactly ${requiredCount} card(s) to keep.`);
+         return createErrorState(warnMsg, newState);
      }
       // Verify selected cards are from the available choices
       let tempCardsToKeep = [...cardsToKeep];
@@ -2441,7 +2536,7 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
                validSelection = false;
                const warnMsg = `[API handleExchangeSelection] Error: Player ${playerId} selected invalid card: ${card}. Choices were: ${exchangeInfo.cardsToChoose.join(',')}`;
                console.warn(warnMsg);
-               return logAction(newState, `Error: Invalid card selected: ${card}.`);
+               return createErrorState(warnMsg, newState);
            }
            tempCardsToChoose.splice(indexInChoices, 1); // Remove the card from choices to handle duplicates correctly
       }
@@ -2465,4 +2560,62 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
          return createErrorState("[API handleExchangeSelection] Internal error after handling exchange.", stateBeforeExchange);
      }
      return stateAfterExchange;
+}
+
+// New handler for Assassin's decision after Contessa block
+export async function handleAssassinationConfirmation(gameState: GameState | null, assassinPlayerId: string, decision: 'Challenge Contessa' | 'Accept Block'): Promise<GameState> {
+    if (!gameState) return createErrorState(`[handleAssassinationConfirmation] Error: gameState is null for Assassin ${assassinPlayerId}.`);
+    console.log(`[handleAssassinationConfirmation] Assassin ${assassinPlayerId} chose: ${decision}`);
+    let newState = JSON.parse(JSON.stringify(gameState));
+    const stateBeforeConfirm = JSON.parse(JSON.stringify(gameState));
+    const confirmPhase = newState.pendingAssassinationConfirmation;
+
+    if (!confirmPhase || confirmPhase.assassinPlayerId !== assassinPlayerId) {
+        const errorMsg = `[handleAssassinationConfirmation] Error: No pending assassination confirmation found for Assassin ${assassinPlayerId}.`;
+        return createErrorState(errorMsg, newState);
+    }
+
+    const assassin = getPlayerById(newState, confirmPhase.assassinPlayerId);
+    const contessaPlayer = getPlayerById(newState, confirmPhase.contessaPlayerId);
+
+    if (!assassin || !contessaPlayer) {
+        const errorMsg = `[handleAssassinationConfirmation] Error: Assassin or Contessa player not found.`;
+        newState.pendingAssassinationConfirmation = null; // Clear invalid phase
+        return createErrorState(errorMsg, newState);
+    }
+
+    // Clear the confirmation phase
+    newState.pendingAssassinationConfirmation = null;
+    newState = logAction(newState, `${assassin.name} decides to ${decision === 'Challenge Contessa' ? 'challenge the Contessa claim' : 'accept the block'}.`);
+
+    if (decision === 'Challenge Contessa') {
+        console.log(`[handleAssassinationConfirmation] Challenging Contessa claim. Setting up challenge decision phase.`);
+        // Initiate a challenge against the 'Block Assassination' claim
+        newState.pendingChallengeDecision = {
+            challengedPlayerId: contessaPlayer.id, // Contessa player is challenged
+            challengerId: assassin.id, // Assassin is the challenger
+            actionOrBlock: 'Block Assassination', // Challenging the block claim
+            // No original target/action needed here as we are resolving the block challenge directly
+        };
+        newState = logAction(newState, `${assassin.name} challenges ${contessaPlayer.name}'s claim of Contessa! ${contessaPlayer.name}, do you want to proceed or retreat?`);
+
+        // Trigger AI decision if Contessa player is AI
+        if (contessaPlayer.isAI) {
+            newState = await handleAIChallengeDecision(newState);
+        } else {
+            console.log(`[handleAssassinationConfirmation] Waiting for Human Contessa (${contessaPlayer.name}) challenge decision.`);
+        }
+    } else { // Accept Block
+        console.log(`[handleAssassinationConfirmation] Block accepted. Assassination fails.`);
+        newState = logAction(newState, `${assassin.name} accepts the block. The assassination attempt fails.`);
+        // Turn advances
+        newState = await advanceTurn(newState);
+    }
+
+    if (!newState || typeof newState.players === 'undefined') {
+        console.error("[handleAssassinationConfirmation] Error: newState became invalid. Reverting.");
+        return createErrorState("[handleAssassinationConfirmation] Internal error after handling confirmation.", stateBeforeConfirm);
+    }
+
+    return newState;
 }
