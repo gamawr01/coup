@@ -117,58 +117,6 @@ function returnCardToDeck(deck: CardType[], card: CardType): CardType[] {
 
 // --- Utility Functions with Enhanced Null Checks ---
 
-// Safely gets a player by ID, returns undefined if not found or gameState is invalid.
-function getPlayerById(gameState: GameState | null, playerId: string | undefined): Player | undefined {
-    // Add robust checks for gameState and gameState.players
-    if (!gameState || !Array.isArray(gameState.players) || !playerId) {
-        if (!gameState) console.warn("[getPlayerById] Called with null gameState.");
-        else if (!Array.isArray(gameState.players)) console.warn("[getPlayerById] Called with invalid gameState (players array missing).");
-        else if (!playerId) console.warn("[getPlayerById] Called with undefined playerId.");
-        return undefined;
-    }
-    return gameState.players.find(p => p.id === playerId);
-}
-
-
-// Safely gets active players, returns empty array if gameState is invalid.
-function getActivePlayers(gameState: GameState | null): Player[] {
-    if (!gameState || !Array.isArray(gameState.players)) {
-        // console.error(`[getActivePlayers] Error: gameState or gameState.players is invalid.`); // Logged too frequently
-        return [];
-    }
-    return gameState.players.filter(p => p.influence.some(card => !card.revealed));
-}
-
-// Safely gets the next player index, returns current index on error.
-function getNextPlayerIndex(currentIndex: number, players: Player[] | undefined): number {
-    // Add check for players array
-    if (!Array.isArray(players) || players.length === 0) {
-        console.error(`[getNextPlayerIndex] Error: Invalid 'players' array provided.`);
-        return currentIndex; // Return current index as fallback
-    }
-
-    const activePlayers = players.filter(p => p.influence.some(card => !card.revealed));
-    if (activePlayers.length <= 1) {
-         // console.log("[getNextPlayerIndex] Only one or zero active players left."); // Too noisy
-         return currentIndex; // Game might be over or only one player left
-    }
-
-    let nextIndex = (currentIndex + 1) % players.length;
-    let safetyCounter = 0; // Prevent infinite loops
-
-     // Loop until we find an active player, checking player existence at each step
-    while (!players[nextIndex] || !players[nextIndex].influence.some(card => !card.revealed)) {
-        nextIndex = (nextIndex + 1) % players.length;
-        safetyCounter++;
-        if (safetyCounter > players.length * 2) { // Increased safety margin
-            console.error("[getNextPlayerIndex] Infinite loop detected! Could not find next active player.");
-            return currentIndex; // Return current index to prevent crash
-        }
-    }
-    // console.log(`[getNextPlayerIndex] Next index: ${nextIndex} (${players[nextIndex].name})`);
-    return nextIndex;
-}
-
 // Helper function to validate if an object is a valid GameState
 // Not exported, used internally. Callers assume valid state is returned.
 function isValidGameStateInternal(state: any): state is GameState {
@@ -203,6 +151,59 @@ function isValidGameStateInternal(state: any): state is GameState {
       }
       // Add more detailed checks as needed for phases etc.
      return true;
+}
+
+
+// Safely gets a player by ID, returns undefined if not found or gameState is invalid.
+function getPlayerById(gameState: GameState | null, playerId: string | undefined): Player | undefined {
+    // Add robust checks for gameState and gameState.players
+    if (!isValidGameStateInternal(gameState) || !playerId) { // Use the validator
+        if (!gameState) console.warn("[getPlayerById] Called with null gameState.");
+        else if (!Array.isArray(gameState.players)) console.warn("[getPlayerById] Called with invalid gameState (players array missing).");
+        else if (!playerId) console.warn("[getPlayerById] Called with undefined playerId.");
+        return undefined;
+    }
+    return gameState.players.find(p => p.id === playerId);
+}
+
+
+// Safely gets active players, returns empty array if gameState is invalid.
+function getActivePlayers(gameState: GameState | null): Player[] {
+    if (!isValidGameStateInternal(gameState)) { // Use the validator
+        // console.error(`[getActivePlayers] Error: gameState is invalid.`); // Logged too frequently
+        return [];
+    }
+    return gameState.players.filter(p => p.influence.some(card => !card.revealed));
+}
+
+// Safely gets the next player index, returns current index on error.
+function getNextPlayerIndex(currentIndex: number, players: Player[] | undefined): number {
+    // Add check for players array
+    if (!Array.isArray(players) || players.length === 0) {
+        console.error(`[getNextPlayerIndex] Error: Invalid 'players' array provided.`);
+        return currentIndex; // Return current index as fallback
+    }
+
+    const activePlayers = players.filter(p => p.influence.some(card => !card.revealed));
+    if (activePlayers.length <= 1) {
+         // console.log("[getNextPlayerIndex] Only one or zero active players left."); // Too noisy
+         return currentIndex; // Game might be over or only one player left
+    }
+
+    let nextIndex = (currentIndex + 1) % players.length;
+    let safetyCounter = 0; // Prevent infinite loops
+
+     // Loop until we find an active player, checking player existence at each step
+    while (!players[nextIndex] || !players[nextIndex].influence.some(card => !card.revealed)) {
+        nextIndex = (nextIndex + 1) % players.length;
+        safetyCounter++;
+        if (safetyCounter > players.length * 2) { // Increased safety margin
+            console.error("[getNextPlayerIndex] Infinite loop detected! Could not find next active player.");
+            return currentIndex; // Return current index to prevent crash
+        }
+    }
+    // console.log(`[getNextPlayerIndex] Next index: ${nextIndex} (${players[nextIndex].name})`);
+    return nextIndex;
 }
 
 
@@ -429,7 +430,12 @@ async function setPlayerNeedsToReveal(gameState: GameState, playerId: string): P
              console.error("[setPlayerNeedsToReveal] Error: newState became invalid after AI reveal. Reverting.");
              return createErrorState("[setPlayerNeedsToReveal] Internal error after AI reveal.", stateBeforeReveal);
          }
-         return newState; // Return the state AFTER the reveal
+         // If reveal is complete and no other pending action, advance turn for AI
+          if (!newState.playerNeedsToReveal && !newState.pendingActionAfterReveal && !newState.winner) {
+              console.log("[setPlayerNeedsToReveal] AI reveal complete and no pending action. Advancing turn.");
+              newState = await advanceTurn(newState);
+          }
+         return newState; // Return the state AFTER the reveal (and potential turn advance)
     } else {
          console.log(`[setPlayerNeedsToReveal] Player ${playerId} is Human. Waiting for UI interaction.`);
          // Validate state before returning
@@ -535,7 +541,7 @@ async function performCoup(gameState: GameState | null, playerId: string, target
         console.log(`[performCoup] Target ${targetId} must reveal influence.`);
         // Set the flag for the target to reveal
         newState = await setPlayerNeedsToReveal(newState, target.id); // Await AI reveal handling
-        // Turn advances *after* reveal is handled
+
 
     } else {
         const errorMsg = `${newState.players[playerIndex]?.name || 'Player'} cannot perform Coup (not enough money or invalid target).`;
@@ -545,7 +551,7 @@ async function performCoup(gameState: GameState | null, playerId: string, target
         return newState; // Return without advancing if failed
     }
 
-     // Don't advance turn here, it happens after the forced reveal is completed via handleForceReveal or processPendingActionAfterReveal
+     // Turn advances *after* reveal is handled (in setPlayerNeedsToReveal or processPendingActionAfterReveal)
      return newState;
 }
 
@@ -2594,7 +2600,6 @@ export async function performAction(gameState: GameState | null, playerId: strin
 
 
 // Make this async because the functions it calls (resolveChallenge/Block/etc.) are async
-// Renamed to handlePlayerResponseLogic to avoid conflict with component handler.
 // Returns a valid GameState even on error.
 export async function handlePlayerResponseLogic(gameState: GameState | null, respondingPlayerId: string, response: GameResponseType): Promise<GameState> {
      if (!isValidGameStateInternal(gameState)) return createErrorState(`[API handlePlayerResponseLogic] Error: gameState is invalid or null for player ${respondingPlayerId}.`);
@@ -2904,5 +2909,3 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     return newState;
 }
-
-
