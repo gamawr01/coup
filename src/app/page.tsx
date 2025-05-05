@@ -50,7 +50,7 @@ export default function Home() {
                console.log("[updateGameState] State value resolved.");
            }
 
-           // Add explicit null check here AND type check
+            // Add explicit null check here AND type check
            if (!newState || typeof newState !== 'object' || !Array.isArray(newState.players) || typeof newState.currentPlayerIndex !== 'number') {
                const invalidStateDetails = JSON.stringify(newState); // Log the invalid state structure
                console.error(`[updateGameState] Error: Received invalid state from update function/promise. State: ${invalidStateDetails}`);
@@ -85,7 +85,7 @@ export default function Home() {
             console.log("[updateGameState] Finished processing state update.");
             setIsProcessing(false); // Ensure processing flag is reset
        }
-   }, [isProcessing, toast]); // Add dependencies
+   }, [isProcessing, toast, gameState]); // Add dependencies - include gameState for fallback cases
 
   const startGame = useCallback(() => {
     if (playerName.trim() === "") {
@@ -172,9 +172,9 @@ export default function Home() {
                 const nextState = await handlePlayerResponse(gameState, humanPlayerId, response);
                 // handlePlayerResponse should now always return a GameState
                 if (!nextState || typeof nextState !== 'object' || !Array.isArray(nextState.players) || typeof nextState.currentPlayerIndex !== 'number') {
-                    console.error("[handlePlayerResponse Callback] handlePlayerResponse from game-logic returned null/undefined or invalid state (unexpected).");
-                    toast({ title: "Error", description: "Response failed to process.", variant: "destructive" });
-                    return gameState; // Return original state if logic fails
+                     console.error("[handlePlayerResponse Callback] handlePlayerResponse from game-logic returned null/undefined or invalid state (unexpected).");
+                     toast({ title: "Error", description: "Response failed to process.", variant: "destructive" });
+                     return gameState; // Return original state if logic fails
                 }
                 console.log(`[handlePlayerResponse Callback] Returning valid nextState.`);
                 return nextState; // Return the valid new state
@@ -460,3 +460,4 @@ export default function Home() {
     </main>
   );
 }
+

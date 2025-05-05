@@ -1280,11 +1280,18 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
            // We can immediately process the pending action.
            if (challenger.isAI) {
                 console.log("[executeChallengeResolution] AI challenger reveal complete. Processing pending action immediately.");
-                return await processPendingActionAfterReveal(newState); // Process the pending action
+                newState = await processPendingActionAfterReveal(newState); // Process the pending action
            } else {
                 console.log("[executeChallengeResolution] Human challenger needs to reveal. Action will proceed afterwards.");
-                return newState; // Return state waiting for human reveal
+                // newState remains waiting for human reveal
            }
+            // Ensure we return a valid state even if we're waiting
+            if (!newState || typeof newState.players === 'undefined') {
+                console.error("[executeChallengeResolution] Error: newState became invalid after setting pending action (challenge failed). Reverting.");
+                return createErrorState("[executeChallengeResolution] Internal error setting pending action (challenge failed).", stateBeforeResolve);
+            }
+           return newState; // Return state waiting for human reveal OR after processing AI reveal
+
 
      } else {
           // --- Challenge Successful (Challenged Player Bluffed) ---
@@ -1313,22 +1320,29 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
            // If the bluffer was AI, their reveal already happened. Process the pending action.
            if (challengedPlayer.isAI) {
                 console.log("[executeChallengeResolution] AI bluffer reveal complete. Processing pending action immediately.");
-               return await processPendingActionAfterReveal(newState); // Process the pending action
+               newState = await processPendingActionAfterReveal(newState); // Process the pending action
            } else {
                 console.log("[executeChallengeResolution] Human bluffer needs to reveal. Consequence will apply afterwards.");
-               return newState; // Return state waiting for human reveal
+               // newState remains waiting for human reveal
            }
+            // Ensure we return a valid state even if we're waiting
+            if (!newState || typeof newState.players === 'undefined') {
+                console.error("[executeChallengeResolution] Error: newState became invalid after setting pending action (challenge succeeded). Reverting.");
+                return createErrorState("[executeChallengeResolution] Internal error setting pending action (challenge succeeded).", stateBeforeResolve);
+            }
+            return newState; // Return state waiting for human reveal OR after processing AI reveal
      }
 }
 
 
-export async function processPendingActionAfterReveal(gameState: GameState): Promise<GameState> {
+export async function processPendingActionAfterReveal(gameState: GameState | null): Promise<GameState> {
     if (!gameState || !gameState.pendingActionAfterReveal) {
-        console.log("[processPendingActionAfterReveal] No pending action found.");
-        return gameState; // No pending action
+        // console.log("[processPendingActionAfterReveal] No pending action found."); // Too noisy
+        return gameState || createErrorState("[processPendingActionAfterReveal] Error: gameState is null and no pending action.");
     }
     console.log("[processPendingActionAfterReveal] Processing action after reveal...");
     let newState = JSON.parse(JSON.stringify(gameState));
+    const stateBeforeProcess = JSON.parse(JSON.stringify(gameState)); // Fallback
     const pendingAction = newState.pendingActionAfterReveal;
      // Clear the pending action flag immediately
     newState.pendingActionAfterReveal = null;
@@ -1436,6 +1450,11 @@ export async function processPendingActionAfterReveal(gameState: GameState): Pro
              newState = await advanceTurn(newState); // Advance turn as a fallback
      }
 
+     // Final validation
+     if (!newState || typeof newState.players === 'undefined') {
+          console.error("[processPendingActionAfterReveal] Error: newState became invalid at end of processing. Reverting.");
+          return createErrorState("[processPendingActionAfterReveal] Internal error at end of processing.", stateBeforeProcess);
+     }
     return newState;
 }
 
@@ -2858,3 +2877,4 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     return newState;
 }
+
