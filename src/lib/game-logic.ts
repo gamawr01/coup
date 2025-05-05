@@ -390,6 +390,7 @@ async function setPlayerNeedsToReveal(gameState: GameState, playerId: string): P
          const cardToReveal = player.influence.find(c => !c.revealed)?.type;
          // Use Promise.resolve to make it thenable, simulating async flow
          const result = await handleForceReveal(newState, playerId, cardToReveal);
+         // The state returned *already* has the playerNeedsToReveal flag cleared by handleForceReveal
          return result.newState; // Return the state AFTER the reveal
     } else {
          console.log(`[setPlayerNeedsToReveal] Player ${playerId} is Human. Waiting for UI interaction.`);
@@ -430,6 +431,9 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
     }
 
     newState = logAction(newState, `${player.name} attempts Foreign Aid (+2 coins).`);
+     // Store cost in currentAction - Use the *updated* player state
+     newState.currentAction = { player: player, action: 'Foreign Aid', target: undefined, cost: 0 };
+
 
     const potentialBlockers = getActivePlayers(newState).filter(p => p.id !== playerId);
 
@@ -513,6 +517,9 @@ async function performTax(gameState: GameState | null, playerId: string): Promis
      }
 
      newState = logAction(newState, `${player.name} attempts to Tax (+3 coins).`);
+     // Store cost in currentAction - Use the *updated* player state
+     newState.currentAction = { player: player, action: 'Tax', target: undefined, cost: 0 };
+
      const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
 
     if (potentialChallengers.length > 0) {
@@ -632,6 +639,8 @@ async function performSteal(gameState: GameState | null, playerId: string, targe
      }
 
     newState = logAction(newState, `${player.name} attempts to Steal from ${target.name}.`);
+     // Store cost in currentAction - Use the *updated* player state
+     newState.currentAction = { player: player, action: 'Steal', target: target, cost: 0 };
 
     const potentialResponders = getActivePlayers(newState).filter(p => p.id !== playerId);
 
@@ -685,6 +694,9 @@ async function performExchange(gameState: GameState | null, playerId: string): P
       }
 
      newState = logAction(newState, `${player.name} attempts Exchange.`);
+      // Store cost in currentAction - Use the *updated* player state
+     newState.currentAction = { player: player, action: 'Exchange', target: undefined, cost: 0 };
+
      const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
 
     if (potentialChallengers.length > 0) {
@@ -1247,24 +1259,28 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
           // If challenge failed, the original action/block proceeds *after* the reveal is handled.
            console.log(`[executeChallengeResolution] Challenge failed. Original claim (${actionOrBlock}) by ${challengedPlayer.name} will proceed after challenger reveal.`);
             // Store pending action
-           newState.pendingActionAfterReveal = {
-               type: actionOrBlock.startsWith('Block ') ? 'block_succeeds' : 'action_proceeds',
-               claimerId: challengedPlayerId,
-               actionOrBlock: actionOrBlock,
-               originalTargetId: originalCurrentAction?.target?.id,
-               originalActionPlayerId: originalCurrentAction?.player?.id,
-               // Store challenger ID to check if they are eliminated after reveal
-               loserId: challengerId,
+           newState = { // Create new object to ensure flag isn't overwritten by reveal state
+              ...stateAfterChallengerReveal, // Start with the state AFTER the reveal
+               pendingActionAfterReveal: {
+                  type: actionOrBlock.startsWith('Block ') ? 'block_succeeds' : 'action_proceeds',
+                  claimerId: challengedPlayerId,
+                  actionOrBlock: actionOrBlock,
+                  originalTargetId: originalCurrentAction?.target?.id,
+                  originalActionPlayerId: originalCurrentAction?.player?.id,
+                  // Store challenger ID to check if they are eliminated after reveal
+                  loserId: challengerId,
+              }
            };
+
 
            // If the challenger was AI, their reveal already happened inside setPlayerNeedsToReveal
            // We can immediately process the pending action.
            if (challenger.isAI) {
                 console.log("[executeChallengeResolution] AI challenger reveal complete. Processing pending action immediately.");
-                return await processPendingActionAfterReveal(stateAfterChallengerReveal); // Process the pending action
+                return await processPendingActionAfterReveal(newState); // Process the pending action
            } else {
                 console.log("[executeChallengeResolution] Human challenger needs to reveal. Action will proceed afterwards.");
-                return stateAfterChallengerReveal; // Return state waiting for human reveal
+                return newState; // Return state waiting for human reveal
            }
 
      } else {
@@ -1278,23 +1294,26 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
           console.log(`[executeChallengeResolution] Bluff called. ${challengedPlayer.name}'s claim for ${actionOrBlock} fails.`);
 
            // Store the next step (which is usually advancing the turn, or proceeding with original action if block failed)
-           newState.pendingActionAfterReveal = {
-               type: actionOrBlock.startsWith('Block ') ? 'block_fails_action_proceeds' : 'action_fails_turn_advances',
-               originalAction: actionOrBlock.startsWith('Block ') ? getActionFromBlock(actionOrBlock as BlockActionType) : null,
-               originalActionPlayerId: actionOrBlock.startsWith('Block ') ? originalCurrentAction?.player?.id : null,
-               originalTargetId: actionOrBlock.startsWith('Block ') ? originalCurrentAction?.target?.id : null,
-                // Store the player who lost influence due to the bluff
-               loserId: challengedPlayerId,
-               failedClaim: actionOrBlock, // Store what claim failed
+           newState = { // Create new object
+              ...stateAfterBlufferReveal, // Start with state after reveal
+               pendingActionAfterReveal: {
+                   type: actionOrBlock.startsWith('Block ') ? 'block_fails_action_proceeds' : 'action_fails_turn_advances',
+                   originalAction: actionOrBlock.startsWith('Block ') ? getActionFromBlock(actionOrBlock as BlockActionType) : null,
+                   originalActionPlayerId: actionOrBlock.startsWith('Block ') ? originalCurrentAction?.player?.id : null,
+                   originalTargetId: actionOrBlock.startsWith('Block ') ? originalCurrentAction?.target?.id : null,
+                    // Store the player who lost influence due to the bluff
+                   loserId: challengedPlayerId,
+                   failedClaim: actionOrBlock, // Store what claim failed
+               }
            };
 
            // If the bluffer was AI, their reveal already happened. Process the pending action.
            if (challengedPlayer.isAI) {
                 console.log("[executeChallengeResolution] AI bluffer reveal complete. Processing pending action immediately.");
-               return await processPendingActionAfterReveal(stateAfterBlufferReveal); // Process the pending action
+               return await processPendingActionAfterReveal(newState); // Process the pending action
            } else {
                 console.log("[executeChallengeResolution] Human bluffer needs to reveal. Consequence will apply afterwards.");
-               return stateAfterBlufferReveal; // Return state waiting for human reveal
+               return newState; // Return state waiting for human reveal
            }
      }
 }
@@ -1339,6 +1358,7 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
              const originalTarget = getPlayerById(newState, pendingAction.originalTargetId);
              if (claimer) {
                  console.log(`[processPendingActionAfterReveal] Reveal complete. Original action ${pendingAction.actionOrBlock} by ${claimer.name} proceeds.`);
+                 newState = logAction(newState, `Challenge failed. ${claimer.name}'s ${pendingAction.actionOrBlock} proceeds.`);
                  if (pendingAction.actionOrBlock === 'Assassinate' && originalTarget) {
                       console.log(`[processPendingActionAfterReveal] Assassinate claim proceeding to block decision stage.`);
                      newState.challengeOrBlockPhase = {
@@ -1353,7 +1373,8 @@ async function processPendingActionAfterReveal(gameState: GameState): Promise<Ga
                      newState = logAction(newState, `${originalTarget.name}, do you block with Contessa or allow the Assassination?`);
                      newState = await triggerAIResponses(newState);
                  } else {
-                      newState = await executeSuccessfulAction(newState, claimer, pendingAction.actionOrBlock as ActionType, originalTarget);
+                     // For Tax and other actions, execute them now.
+                     newState = await executeSuccessfulAction(newState, claimer, pendingAction.actionOrBlock as ActionType, originalTarget);
                  }
              } else {
                   const errorMsg = `[processPendingActionAfterReveal] Error: Original claimer ${pendingAction.claimerId} not found.`;
@@ -1965,28 +1986,40 @@ export async function handleAIAction(gameState: GameState | null): Promise<GameS
 async function triggerAIResponses(gameState: GameState | null): Promise<GameState> {
      if (!gameState) return createErrorState("[triggerAIResponses] Error: gameState is null.");
     let newState = JSON.parse(JSON.stringify(gameState)); // Deep copy
-    let currentPhase = newState.challengeOrBlockPhase; // Use challenge/block phase only
+    let currentPhase = newState.challengeOrBlockPhase || newState.pendingChallengeDecision || newState.pendingAssassinationConfirmation ? { ... (newState.challengeOrBlockPhase || newState.pendingChallengeDecision || newState.pendingAssassinationConfirmation) } : null; // Use the active phase
     let stateBeforeLoop = JSON.parse(JSON.stringify(gameState)); // Keep original state for fallback
 
-
-    // Determine which list of possible responders to use
-    let possibleResponders: Player[] = [];
-    let currentResponses: {playerId: string, response: GameResponseType | ChallengeDecisionType}[] = [];
-
+     // Determine which list of possible responders to use based on the active phase
+     let possibleResponders: Player[] = [];
+     let currentResponses: {playerId: string, response: GameResponseType | ChallengeDecisionType}[] = [];
 
      if (newState.challengeOrBlockPhase) {
-        currentPhase = newState.challengeOrBlockPhase;
-         possibleResponders = currentPhase.possibleResponses;
-         currentResponses = currentPhase.responses;
-         console.log(`[triggerAIResponses] Phase active: Action=${currentPhase.action}, Stage=${currentPhase.stage}, Possible Responders=${possibleResponders.map(p=>p.name).join(',')}, Current Responses=${currentResponses.length}`);
+         const phase = newState.challengeOrBlockPhase;
+         possibleResponders = phase.possibleResponses;
+         currentResponses = phase.responses;
+         console.log(`[triggerAIResponses] Phase active: Challenge/Block. Action=${phase.action}, Stage=${phase.stage}, Possible Responders=${possibleResponders.map(p=>p.name).join(',')}, Current Responses=${currentResponses.length}`);
+     } else if (newState.pendingChallengeDecision) {
+          // In this phase, only the challenged player 'responds' (Proceed/Retreat), but it's handled separately by handleAIChallengeDecision
+          console.log(`[triggerAIResponses] Phase active: Pending Challenge Decision for ${newState.pendingChallengeDecision.challengedPlayerId}. AI response handled elsewhere.`);
+         return newState; // No standard AI responses needed here
+     } else if (newState.pendingAssassinationConfirmation) {
+          // In this phase, only the assassin 'responds' (Challenge Contessa/Accept Block), handled by handleAIAssassinationConfirmation
+          console.log(`[triggerAIResponses] Phase active: Pending Assassination Confirmation for ${newState.pendingAssassinationConfirmation.assassinPlayerId}. AI response handled elsewhere.`);
+         return newState; // No standard AI responses needed here
      } else {
           console.log("[triggerAIResponses] No active challenge/block phase needing AI responses.");
          return newState; // No relevant phase active
      }
 
+
     try {
-        // Loop while there's an active phase and AI responders who haven't responded yet
-         while (currentPhase && possibleResponders.some(p => p.isAI && !currentResponses.some(r => r.playerId === p.id))) {
+        // Loop while there's an active challenge/block phase and AI responders who haven't responded yet
+        while (newState.challengeOrBlockPhase && newState.challengeOrBlockPhase.possibleResponses.some(p => p.isAI && !newState.challengeOrBlockPhase?.responses.some(r => r.playerId === p.id))) {
+             // Refresh phase pointers for the current loop iteration
+            currentPhase = newState.challengeOrBlockPhase!;
+            possibleResponders = currentPhase.possibleResponses;
+            currentResponses = currentPhase.responses;
+
             const aiRespondersThisLoop = possibleResponders.filter(p => p.isAI && !currentResponses.some(r => r.playerId === p.id));
             const aiToAct = aiRespondersThisLoop[0]; // Process one AI at a time
 
@@ -1999,15 +2032,11 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
             const aiPlayerState = getPlayerById(newState, aiToAct.id);
              if (!aiPlayerState) { // Safety check
                  console.error(`[triggerAIResponses] Error: AI Responder ${aiToAct.id} not found in state. Skipping response.`);
-                  if (newState.challengeOrBlockPhase) {
-                     newState.challengeOrBlockPhase.responses.push({ playerId: aiToAct.id, response: 'Allow' }); // Force allow to prevent loop?
-                  } else {
-                      console.error("[triggerAIResponses] Error: challengeOrBlockPhase is null when trying to force 'Allow'.");
-                      break; // Break loop if phase disappeared
-                  }
+                 // Force allow to prevent loop?
+                 newState.challengeOrBlockPhase.responses.push({ playerId: aiToAct.id, response: 'Allow' });
                  newState = logAction(newState, `[triggerAIResponses] Error: AI ${aiToAct.id} not found. Forced 'Allow'.`);
                   // Refresh phase pointers after modifying state
-                 currentPhase = newState.challengeOrBlockPhase;
+                 currentPhase = newState.challengeOrBlockPhase; // This might be null if forced allow resolves it
                   if (currentPhase) { // Check if phase still exists
                       possibleResponders = currentPhase.possibleResponses;
                       currentResponses = currentPhase.responses;
@@ -2829,5 +2858,3 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     return newState;
 }
-
-    
