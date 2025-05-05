@@ -2,6 +2,7 @@
 
 'use client';
 
+import type { ChangeEvent } from 'react'; // Import ChangeEvent
 import { useState, useEffect, useCallback } from 'react';
 import { GameBoard } from '@/components/game-board';
 import type { GameState, ActionType, CardType, GameResponseType, ChallengeDecisionType } from '@/lib/game-types';
@@ -219,8 +220,8 @@ export default function Home() {
 
    // Handler for forced reveal confirmation (if player has multiple cards)
    const handlePlayerForceReveal = useCallback((cardToReveal: CardType) => {
-       if (!gameState || isProcessing || gameState.winner /* || !gameState.forceRevealPlayerId || gameState.forceRevealPlayerId !== humanPlayerId */) { // Simplified check for now
-             console.warn(`[handleForceReveal] Reveal blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, winner=${!!gameState?.winner}`); // , forceReveal=${gameState?.forceRevealPlayerId}`);
+       if (!gameState || isProcessing || gameState.winner || gameState.playerNeedsToReveal !== humanPlayerId) { // Use the explicit flag
+             console.warn(`[handleForceReveal] Reveal blocked: gameState=${!!gameState}, isProcessing=${isProcessing}, winner=${!!gameState?.winner}, needsReveal=${gameState?.playerNeedsToReveal}`);
              return;
        }
         console.log(`[handleForceReveal] Human forced reveal: ${cardToReveal}`);
@@ -239,7 +240,17 @@ export default function Home() {
                      toast({ title: "Error", description: "Reveal failed to process.", variant: "destructive" });
                      return gameState;
                   }
-                 return result.newState;
+                 // After reveal, check if a pending action needs to be processed
+                 if (result.newState.pendingActionAfterReveal) {
+                     console.log("[handleForceReveal] Pending action found. Processing...");
+                     const stateAfterPendingAction = await processPendingActionAfterReveal(result.newState);
+                     return stateAfterPendingAction;
+                 } else if (!result.newState.playerNeedsToReveal && !result.newState.winner) { // If reveal finished and no pending action, advance turn
+                     console.log("[handleForceReveal] Reveal complete, advancing turn.");
+                     return await advanceTurn(result.newState);
+                 } else {
+                     return result.newState; // Return state (might be game over or waiting for another reveal)
+                 }
              } catch (error: any) {
                   console.error(`[handleForceReveal Callback] Error during game logic call: ${error.message}`, error);
                   toast({ title: "Error", description: `Failed to process reveal: ${error.message}`, variant: "destructive" });
@@ -362,7 +373,7 @@ export default function Home() {
                        <Input
                            id="playerName"
                            value={playerName}
-                           onChange={(e) => setPlayerName(e.target.value)}
+                           onChange={(e: ChangeEvent<HTMLInputElement>) => setPlayerName(e.target.value)} // Added type annotation
                            placeholder="Enter your name"
                        />
                    </div>
@@ -372,7 +383,7 @@ export default function Home() {
                            id="aiCount"
                            type="number"
                            value={aiCount}
-                            onChange={(e) => setAiCount(Math.max(MIN_AI_COUNT, Math.min(MAX_AI_COUNT, parseInt(e.target.value, 10) || MIN_AI_COUNT)))}
+                            onChange={(e: ChangeEvent<HTMLInputElement>) => setAiCount(Math.max(MIN_AI_COUNT, Math.min(MAX_AI_COUNT, parseInt(e.target.value, 10) || MIN_AI_COUNT)))} // Added type annotation
                            min={MIN_AI_COUNT}
                            max={MAX_AI_COUNT}
                        />
@@ -431,4 +442,24 @@ export default function Home() {
        )}
     </main>
   );
+}
+
+// Helper function added (example, adjust as needed)
+async function processPendingActionAfterReveal(gameState: GameState): Promise<GameState> {
+  // This function should exist in game-logic.ts or be imported
+  // For now, just log and return state - requires implementation in game-logic.ts
+  console.log("Attempting to process pending action after reveal...");
+  // Call the actual function from game-logic.ts here if it exists
+  // Example: return await actualProcessPendingAction(gameState);
+  return gameState;
+}
+
+// Helper function added (example, adjust as needed)
+async function advanceTurn(gameState: GameState): Promise<GameState> {
+  // This function should exist in game-logic.ts or be imported
+  // For now, just log and return state - requires implementation in game-logic.ts
+  console.log("Attempting to advance turn...");
+  // Call the actual function from game-logic.ts here if it exists
+  // Example: return await actualAdvanceTurn(gameState);
+  return gameState;
 }
