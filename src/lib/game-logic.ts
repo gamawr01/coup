@@ -380,8 +380,8 @@ async function performForeignAid(gameState: GameState | null, playerId: string):
             action: 'Foreign Aid',
             possibleResponses: potentialBlockers,
             responses: [],
-            stage: 'challenge_action', // Initial stage: challenge or block the action
-            validResponses: ['Challenge', 'Allow', 'Block Foreign Aid'],
+            stage: 'challenge_action', // Initial stage: block or allow
+            validResponses: ['Allow', 'Block Foreign Aid'], // Foreign Aid cannot be challenged, only blocked by Duke.
         };
         // AI needs to decide to challenge or block here
          const stateAfterTrigger = await triggerAIResponses(newState);
@@ -515,7 +515,7 @@ async function performAssassinate(gameState: GameState | null, playerId: string,
      newState.treasury = newTreasury;
      newState = logAction(newState, `${player.name} attempts to Assassinate ${target.name} (-3 coins). Now has ${newMoney} coins.`);
      // Store cost in currentAction
-     newState.currentAction = { ...newState.currentAction!, cost: 3 };
+     newState.currentAction = { ...newState.currentAction!, player: newState.players[playerIndex], action: 'Assassinate', target, cost: 3 }; // Make sure player state is updated
 
 
     const potentialChallengers = getActivePlayers(newState).filter(p => p.id !== playerId);
@@ -2395,7 +2395,8 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
      }
 
 
-     // --- Legacy Validation (keeping for now, but stage validation is primary) ---
+     // --- Legacy Validation (Removed: Now rely solely on validResponsesForStage) ---
+     /*
      // Check if response type is valid for the action/block being claimed
      const claim = phase.action; // The action or block being claimed/responded to
      if (response === 'Challenge') {
@@ -2428,6 +2429,7 @@ export async function handlePlayerResponse(gameState: GameState | null, respondi
          }
           // Foreign Aid can be blocked by anyone (if Duke claim is valid)
      }
+     */
 
 
     const respondingPlayer = getPlayerById(newState, respondingPlayerId);
@@ -2702,5 +2704,3 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     return newState;
 }
-
-    
