@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType, ChallengeDecisionType, BlockActionType } from '@/lib/game-types';
@@ -18,7 +17,7 @@ interface GameBoardProps {
   humanPlayerId: string;
   onAction: (action: ActionType, targetId?: string) => void;
   onResponse: (response: GameResponseType) => void;
-  onExchange: (cardsToKeep: CardType[]) => void;
+  onExchange: (cardsToKeepIndices: number[]) => void; // Changed to indices
   onForceReveal: (cardToReveal: CardType) => void; // Needs card type
   onChallengeDecision: (decision: ChallengeDecisionType) => void; // Add this prop
   onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void; // Add this prop
@@ -45,10 +44,15 @@ const actionIcons: Record<ActionType, React.ReactNode> = {
 
 const InfluenceCardDisplay: React.FC<{ card: InfluenceCard; playerId: string; humanPlayerId: string }> = ({ card, playerId, humanPlayerId }) => {
   const isHumanPlayerCard = playerId === humanPlayerId;
-  const displayType = card.revealed || isHumanPlayerCard ? card.type : 'Hidden';
-  const bgColor = card.revealed ? 'bg-muted' : (isHumanPlayerCard ? cardInfo[card.type]?.color : 'bg-gray-700');
-  const textColor = card.revealed ? 'text-muted-foreground line-through' : 'text-primary-foreground';
-  const icon = card.revealed || isHumanPlayerCard ? cardInfo[card.type]?.icon : <HelpCircle className="w-4 h-4" />;
+  const cardType = card?.type; // Safe access to card type
+
+  // Determine display properties safely
+  const displayType = (card?.revealed || isHumanPlayerCard) && cardType ? cardType : 'Hidden';
+  const info = cardType ? cardInfo[cardType] : null;
+
+  const bgColor = card?.revealed ? 'bg-muted' : (isHumanPlayerCard && info ? info.color : 'bg-gray-700');
+  const textColor = card?.revealed ? 'text-muted-foreground line-through' : 'text-primary-foreground';
+  const icon = (card?.revealed || isHumanPlayerCard) && info ? info.icon : <HelpCircle className="w-4 h-4" />;
 
   return (
     <Badge variant="secondary" className={`flex items-center gap-1 px-2 py-1 ${bgColor} ${textColor}`}>
@@ -113,7 +117,7 @@ const ActionButtons: React.FC<{
     const mustCoup = (humanPlayer?.money ?? 0) >= 10;
 
     // Don't show buttons if not human's turn, or waiting for response/exchange/decision/confirmation/game over
-    if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.pendingChallengeDecision || gameState.pendingAssassinationConfirmation || gameState.winner) {
+    if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.pendingChallengeDecision || gameState.pendingAssassinationConfirmation || gameState.winner || gameState.playerNeedsToReveal) {
         return null;
     }
 
@@ -314,7 +318,7 @@ const ResponsePrompt: React.FC<{
 const ExchangePrompt: React.FC<{
     gameState: GameState;
     humanPlayerId: string;
-    onExchange: (cardsToKeep: CardType[]) => void;
+    onExchange: (cardsToKeepIndices: number[]) => void; // Pass indices
 }> = ({ gameState, humanPlayerId, onExchange }) => {
     const exchangeInfo = gameState.pendingExchange;
     const player = gameState.players.find(p => p.id === humanPlayerId);
@@ -347,8 +351,8 @@ const ExchangePrompt: React.FC<{
     // Map selected indices back to card types for the onExchange callback
     const handleConfirm = () => {
          if (canConfirm) {
-            const cardsToKeep = selectedIndices.map(index => cardsToChooseFrom[index]);
-            onExchange(cardsToKeep);
+            // const cardsToKeep = selectedIndices.map(index => cardsToChooseFrom[index]);
+            onExchange(selectedIndices); // Pass the indices directly
          }
      };
 
@@ -362,6 +366,7 @@ const ExchangePrompt: React.FC<{
                 <div className="flex flex-wrap gap-2 justify-center mb-4">
                     {cardsToChooseFrom.map((card, index) => {
                          const isSelected = selectedIndices.includes(index);
+                         const info = card ? cardInfo[card] : null; // Safe access
                          return (
                              <Button
                                 key={index} // Use index as the unique key
@@ -369,7 +374,7 @@ const ExchangePrompt: React.FC<{
                                 onClick={() => handleCardToggle(index)}
                                 className="flex items-center gap-1"
                               >
-                                 {cardInfo[card].icon} {card}
+                                 {info?.icon || <HelpCircle className="w-4 h-4"/>} {card || 'Unknown'}
                               </Button>
                          );
                     })}
@@ -411,11 +416,14 @@ const ForcedRevealPrompt: React.FC<{
                 <CardDescription>You must reveal one of your influence cards.</CardDescription>
             </CardHeader>
             <CardContent className="flex gap-2 justify-center">
-                {unrevealedCards.map((card, index) => (
-                    <Button key={index} onClick={() => onForceReveal(card.type)} variant="destructive" className="flex items-center gap-1">
-                        {cardInfo[card.type].icon} Reveal {card.type}
-                    </Button>
-                ))}
+                {unrevealedCards.map((card, index) => {
+                     const info = card?.type ? cardInfo[card.type] : null;
+                     return (
+                         <Button key={index} onClick={() => card.type && onForceReveal(card.type)} variant="destructive" className="flex items-center gap-1" disabled={!card.type}>
+                            {info?.icon || <HelpCircle className="w-4 h-4"/>} Reveal {card.type || 'Unknown'}
+                         </Button>
+                     )
+                })}
             </CardContent>
         </Card>
     );
@@ -428,7 +436,7 @@ const ChallengeDecisionPrompt: React.FC<{
     onChallengeDecision: (decision: ChallengeDecisionType) => void;
 }> = ({ gameState, humanPlayerId, onChallengeDecision }) => {
     const decisionPhase = gameState.pendingChallengeDecision;
-    console.log("[ChallengeDecisionPrompt] Rendering. Phase:", decisionPhase, "Human ID:", humanPlayerId);
+    // console.log("[ChallengeDecisionPrompt] Rendering. Phase:", decisionPhase, "Human ID:", humanPlayerId);
 
 
     // Show only if it's the human player's turn to decide
@@ -441,7 +449,7 @@ const ChallengeDecisionPrompt: React.FC<{
 
     if (!challenger) return null; // Safety check
 
-     console.log("[ChallengeDecisionPrompt] Displaying prompt for human.");
+     // console.log("[ChallengeDecisionPrompt] Displaying prompt for human.");
 
     return (
         <Card className="mt-4 border-yellow-500 border-2 shadow-lg">
@@ -471,7 +479,7 @@ const AssassinationConfirmationPrompt: React.FC<{
     onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void;
 }> = ({ gameState, humanPlayerId, onAssassinationConfirmation }) => {
     const confirmPhase = gameState.pendingAssassinationConfirmation;
-     console.log("[AssassinationConfirmationPrompt] Rendering. Phase:", confirmPhase, "Human ID:", humanPlayerId);
+     // console.log("[AssassinationConfirmationPrompt] Rendering. Phase:", confirmPhase, "Human ID:", humanPlayerId);
 
     // Show only if it's the human player's (Assassin) turn to confirm
     if (!confirmPhase || confirmPhase.assassinPlayerId !== humanPlayerId) {
@@ -482,7 +490,7 @@ const AssassinationConfirmationPrompt: React.FC<{
 
     if (!contessaPlayer) return null; // Safety check
 
-    console.log("[AssassinationConfirmationPrompt] Displaying prompt for human Assassin.");
+    // console.log("[AssassinationConfirmationPrompt] Displaying prompt for human Assassin.");
 
     return (
         <Card className="mt-4 border-orange-500 border-2 shadow-lg">
@@ -509,11 +517,11 @@ const AssassinationConfirmationPrompt: React.FC<{
 export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal, onChallengeDecision, onAssassinationConfirmation }) => {
     const humanPlayer = gameState.players.find(p => p.id === humanPlayerId);
     const otherPlayers = gameState.players.filter(p => p.id !== humanPlayerId);
-     console.log("[GameBoard] Rendering. GameState:", gameState, "Human ID:", humanPlayerId); // Add top-level log
+     // console.log("[GameBoard] Rendering. GameState:", gameState, "Human ID:", humanPlayerId); // Add top-level log
 
 
     // Determine if the human player *needs* to act
-    const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation && !gameState.winner;
+    const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation && !gameState.winner && !gameState.playerNeedsToReveal;
     const isHumanResponding = gameState.challengeOrBlockPhase?.possibleResponses.some(p => p.id === humanPlayerId) && !gameState.challengeOrBlockPhase?.responses.some(r => r.playerId === humanPlayerId) && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation;
     const isHumanExchanging = gameState.pendingExchange?.player.id === humanPlayerId;
     const isHumanDecidingChallenge = gameState.pendingChallengeDecision?.challengedPlayerId === humanPlayerId;
@@ -521,14 +529,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
     const isHumanForcedToReveal = gameState.playerNeedsToReveal === humanPlayerId; // Use the direct flag
 
       // Log which prompt should be active
-      console.log("[GameBoard] Active States:", {
+      /* console.log("[GameBoard] Active States:", {
          isHumanTurn,
          isHumanResponding,
          isHumanExchanging,
          isHumanDecidingChallenge,
          isHumanConfirmingAssassination,
          isHumanForcedToReveal
-       });
+       }); */
 
 
     return (

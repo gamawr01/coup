@@ -1,5 +1,4 @@
 
-
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType, ChallengeDecisionType, InteractionStage } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
@@ -149,6 +148,11 @@ function isValidGameStateInternal(state: any): state is GameState {
          console.warn("[isValidGameStateInternal] Invalid player structure found.");
          return false;
       }
+       // Check player influence structure (basic)
+       if (state.players.some((p: Player) => p.influence.some((inf: any) => !inf || typeof inf !== 'object' || typeof inf.revealed !== 'boolean' || typeof inf.type !== 'string'))) {
+           console.warn("[isValidGameStateInternal] Invalid player influence structure found.");
+           return false;
+       }
       // Add more detailed checks as needed for phases etc.
      return true;
 }
@@ -434,7 +438,12 @@ async function setPlayerNeedsToReveal(gameState: GameState, playerId: string): P
           if (!newState.playerNeedsToReveal && !newState.pendingActionAfterReveal && !newState.winner) {
               console.log("[setPlayerNeedsToReveal] AI reveal complete and no pending action. Advancing turn.");
               newState = await advanceTurn(newState);
+          } else if (newState.playerNeedsToReveal) {
+             console.warn(`[setPlayerNeedsToReveal] playerNeedsToReveal flag is still set for ${newState.playerNeedsToReveal} after AI reveal - possibly reveal failed?`);
+          } else if (newState.pendingActionAfterReveal) {
+               console.log(`[setPlayerNeedsToReveal] AI reveal complete, but pending action found. Will be processed.`);
           }
+
          return newState; // Return the state AFTER the reveal (and potential turn advance)
     } else {
          console.log(`[setPlayerNeedsToReveal] Player ${playerId} is Human. Waiting for UI interaction.`);
@@ -858,8 +867,12 @@ async function completeExchange(gameState: GameState | null, playerId: string, c
 
     // Update player influence
     const revealedInfluence = player.influence.filter(c => c.revealed);
-    const newUnrevealedInfluence: InfluenceCard[] = cardsToKeep.map(type => ({ type, revealed: false })); // Use the mapped card types
+    // Create new unrevealed influence cards based on the selected types
+    const newUnrevealedInfluence: InfluenceCard[] = cardsToKeep.map(type => ({ type, revealed: false }));
+    // Combine revealed and new unrevealed cards
     const newPlayerInfluence = [...revealedInfluence, ...newUnrevealedInfluence];
+
+    // Ensure the player object is updated immutably
     newState.players[playerIndex] = { ...player, influence: newPlayerInfluence };
 
 
@@ -2671,7 +2684,7 @@ export async function handlePlayerResponseLogic(gameState: GameState | null, res
                      challengerId: respondingPlayerId,
                      actionOrBlock: currentPhase.action, // The claim that was challenged
                       // Pass original context if the challenged item was a block
-                      originalTargetPlayerId: currentPhase.action.startsWith('Block ') ? currentPhase.targetPlayer?.id : undefined,
+                      originalTargetPlayerId: currentPhase.action.startsWith('Block ') ? phase.targetPlayer?.id : undefined,
                       originalActionPlayerId: currentPhase.action.startsWith('Block ') ? newState.currentAction?.player.id : undefined, // Get original player from context
                  };
                  newState = logAction(newState, `${respondingPlayer.name} challenges ${challengedPlayer.name}'s claim of ${currentPhase.action}! ${challengedPlayer.name}, do you want to proceed or retreat?`);
