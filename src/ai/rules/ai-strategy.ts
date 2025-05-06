@@ -188,6 +188,14 @@ export function determineAIChallenge(gameState: GameState, aiPlayer: Player, act
          return { decision: false, confidence: 100, reasoning: reasoning + "Decision: No Challenge." };
     }
 
+    // --- Specific Assassination Challenge Logic (Rule 6 - if AI is target) ---
+    const isTargetOfAssassination = currentAction?.action === 'Assassinate' && currentAction.target?.id === aiPlayer.id;
+    if (actionOrBlock === 'Assassinate' && isTargetOfAssassination && aiInfluenceCount === 1) {
+        reasoning += `AI has 1 influence and is target of Assassination. Prioritizing survival. Will not challenge Assassin claim. `;
+        return { decision: false, confidence: 98, reasoning: reasoning + "Decision: No Challenge." };
+    }
+
+
     // --- Coin Verification (Rule 1) ---
     let coinCheckPassed = true;
     let coinReasoning = '';
@@ -304,32 +312,58 @@ export function determineAIBlock(gameState: GameState, aiPlayer: Player, action:
     const hasBlockCard = aiPlayer.influence.some(card => !card.revealed && card.type === blockCard);
     const hasAltStealBlock = action === 'Steal' && aiPlayer.influence.some(card => !card.revealed && card.type === 'Ambassador');
     const canBlockTruthfully = hasBlockCard || hasAltStealBlock;
+    const aiInfluenceCount = aiPlayer.influence.filter(c => !c.revealed).length;
 
-    if (canBlockTruthfully) {
+
+    // --- Specific Assassination Block Logic ---
+    if (action === 'Assassinate') {
+        if (aiInfluenceCount === 1) {
+            if (canBlockTruthfully) { // Has Contessa
+                shouldBlock = true;
+                confidence = 99; // Very high confidence, survival is key
+                reasoning += `AI has 1 influence and Contessa. Must block Assassination. Confidence: ${confidence}%. Decision: Block.`;
+            } else { // Has 1 influence, but not Contessa
+                shouldBlock = false; // Cannot bluff block, too risky
+                confidence = 100; // Confidence in *not* bluffing
+                reasoning += `AI has 1 influence but no Contessa. Cannot bluff block Assassination. Confidence(Not Blocking): ${confidence}%. Decision: No Block.`;
+            }
+        } else { // AI has 2+ influence
+            if (canBlockTruthfully) {
+                shouldBlock = true;
+                confidence = 95;
+                reasoning += `Can truthfully block Assassination with Contessa. Confidence: ${confidence}%. Decision: Block.`;
+            } else {
+                // Consider bluffing Contessa if AI has 2+ influence
+                reasoning += `Cannot block Assassination truthfully. Evaluating bluff... `;
+                confidence = 30; // Lower confidence in bluffing a block
+                reasoning += `Low confidence in bluffing Contessa block. Confidence(Not Bluffing): ${100-confidence}%. Decision: No Block.`;
+            }
+        }
+    } else if (canBlockTruthfully) { // Standard block logic for other actions
         // Generally beneficial to block if possible, unless strategically bad
         shouldBlock = true;
         confidence = 95; // High confidence if holding the card
          reasoning += `Can truthfully block ${action} with ${hasBlockCard ? blockCard : 'Ambassador'}. Confidence: ${confidence}%. Decision: Block.`;
-         // Could add nuance: maybe DON'T block Foreign Aid early game if AI also needs it?
          if(action === 'Foreign Aid' && getGamePhase(gameState) === 'start') {
             // confidence -= 10; // Slightly less confident early game
             // reasoning += " (Slightly less confident early game).";
          }
     } else {
-        // --- Consider Bluffing Block ---
+        // --- Consider Bluffing Block (Non-Assassination) ---
         reasoning += `Cannot block ${action} truthfully. Evaluating bluff... `;
-        const aiInfluenceCount = aiPlayer.influence.filter(c => !c.revealed).length;
-        if (aiInfluenceCount <= 1) {
+        if (aiInfluenceCount <= 1) { // Already handled for Assassination
              reasoning += 'Cannot bluff block with 1 or less influence. ';
              confidence = 0; // Confidence in *not* bluffing block
+             shouldBlock = false;
         } else {
             // Bluffing is risky. Generally avoid unless necessary.
             // Low confidence in bluffing block unless opponent seems unlikely to challenge.
             confidence = 20; // Low base confidence in bluffing a block
+            shouldBlock = false;
             reasoning += `Low confidence in bluffing block. Confidence(Not Bluffing): ${100-confidence}%. `;
              // TODO: Add factors like opponent's challenge history if tracked
         }
-         reasoning += "Decision: No Block.";
+         if (!shouldBlock) reasoning += "Decision: No Block.";
     }
 
      console.log(`[determineAIBlock] AI: ${aiPlayer.name}, Opponent Action: ${action}, CanBlockTruthfully: ${canBlockTruthfully}, Confidence: ${confidence}%, ShouldBlock: ${shouldBlock}`);
@@ -343,4 +377,5 @@ declare function getAvailableActions(player: Player, gameState: GameState): Acti
 // Helper function to get active players (assuming it exists)
 declare function getActivePlayers(gameState: GameState): Player[];
 
+    
     
