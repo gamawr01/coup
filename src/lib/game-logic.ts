@@ -1,8 +1,7 @@
-
 import { type GameState, type Player, type CardType, type InfluenceCard, DeckComposition, ActionType, GameResponseType, BlockActionType, ChallengeActionType, ChallengeDecisionType, InteractionStage } from './game-types';
 import { selectAction } from '@/ai/flows/ai-action-selection';
 import { aiChallengeReasoning } from '@/ai/flows/ai-challenge-reasoning';
-import { aiBlockReasoning } from '@/ai/flows/ai-block-reasoning';
+import { aiBlockReasoning } from '@/ai/flows/ai-block-reasoning'; // Corrected import
 import { coupRulebook } from '@/ai/rules/coup-rulebook'; // Import rulebook
 
 // Fisher-Yates Shuffle Algorithm
@@ -119,16 +118,20 @@ function returnCardToDeck(deck: CardType[], card: CardType): CardType[] {
 // Helper function to validate if an object is a valid GameState
 // Not exported, used internally. Callers assume valid state is returned.
 function isValidGameStateInternal(state: any): state is GameState {
-     if (!state || typeof state !== 'object') {
-         console.warn("[isValidGameStateInternal] State is null or not an object.");
+     if (state === null || state === undefined) { // Check for null or undefined first
+        // console.warn("[isValidGameStateInternal] State is null or undefined."); // Too noisy
+        return false;
+      }
+     if (typeof state !== 'object') {
+         console.warn("[isValidGameStateInternal] State is not an object.");
          return false;
      }
      if (!Array.isArray(state.players)) {
          console.warn("[isValidGameStateInternal] State.players is not an array.");
          return false;
      }
-     if (typeof state.currentPlayerIndex !== 'number' || !Number.isInteger(state.currentPlayerIndex) || state.currentPlayerIndex < 0) {
-         console.warn("[isValidGameStateInternal] State.currentPlayerIndex is invalid.");
+     if (typeof state.currentPlayerIndex !== 'number' || !Number.isInteger(state.currentPlayerIndex) || state.currentPlayerIndex < 0 || state.currentPlayerIndex >= state.players.length) {
+         console.warn(`[isValidGameStateInternal] State.currentPlayerIndex (${state.currentPlayerIndex}) is invalid or out of bounds for players array (length: ${state.players.length}).`);
          return false;
      }
       if (!Array.isArray(state.deck)) {
@@ -162,9 +165,7 @@ function isValidGameStateInternal(state: any): state is GameState {
 function getPlayerById(gameState: GameState | null, playerId: string | undefined): Player | undefined {
     // Add robust checks for gameState and gameState.players
     if (!isValidGameStateInternal(gameState) || !playerId) { // Use the validator
-        if (!gameState) console.warn("[getPlayerById] Called with null gameState.");
-        else if (!Array.isArray(gameState.players)) console.warn("[getPlayerById] Called with invalid gameState (players array missing).");
-        else if (!playerId) console.warn("[getPlayerById] Called with undefined playerId.");
+        // Logging moved inside the validator
         return undefined;
     }
     return gameState.players.find(p => p.id === playerId);
@@ -229,7 +230,7 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
     let baseState: GameState;
 
     // Attempt to use previousState if it's valid, otherwise use defaultState
-    if (previousState && isValidGameStateInternal(previousState)) {
+    if (isValidGameStateInternal(previousState)) { // Check validity before cloning
         try {
             // Deep copy the valid previous state
             baseState = JSON.parse(JSON.stringify(previousState));
@@ -239,8 +240,8 @@ function createErrorState(errorMessage: string, previousState?: GameState | null
             baseState = JSON.parse(JSON.stringify(defaultState)); // Deep copy default on clone error
         }
     } else {
-        if (previousState) {
-             console.warn(`[createErrorState] Previous state provided but invalid. Using default state.`);
+        if (previousState !== null && previousState !== undefined) { // Only warn if it was actually passed
+             console.warn(`[createErrorState] Previous state provided but invalid or null/undefined. Using default state.`);
         } else {
              console.log("[createErrorState] No previous state provided. Using default state.");
         }
@@ -442,6 +443,8 @@ async function setPlayerNeedsToReveal(gameState: GameState, playerId: string): P
              console.warn(`[setPlayerNeedsToReveal] playerNeedsToReveal flag is still set for ${newState.playerNeedsToReveal} after AI reveal - possibly reveal failed?`);
           } else if (newState.pendingActionAfterReveal) {
                console.log(`[setPlayerNeedsToReveal] AI reveal complete, but pending action found. Will be processed.`);
+          } else if (newState.winner) {
+               console.log(`[setPlayerNeedsToReveal] AI reveal resulted in game over.`);
           }
 
          return newState; // Return the state AFTER the reveal (and potential turn advance)
@@ -824,8 +827,8 @@ async function completeExchange(gameState: GameState | null, playerId: string, c
 
     if (playerIndex === -1 || !exchangeInfo || exchangeInfo.player.id !== playerId) {
         const errorMsg = `[completeExchange] Invalid state for completing exchange. Phase: ${JSON.stringify(exchangeInfo)}`;
-        const stateWithError = logAction(newState, errorMsg);
-        if (stateWithError) stateWithError.pendingExchange = null;
+        let stateWithError = logAction(newState, errorMsg);
+        if (isValidGameStateInternal(stateWithError)) stateWithError.pendingExchange = null; // Check validity before modifying
         return stateWithError || createErrorState(errorMsg, gameState); // Return error state or fallback
     }
 
@@ -910,7 +913,7 @@ async function resolveChallengeOrBlock(gameState: GameState): Promise<GameState>
      // Safety check if players were somehow removed during the phase (unlikely)
      if (!actionPlayer) {
          const errorMsg = `[resolveChallengeOrBlock] Error: Action player ${phase.actionPlayer.id} not found during resolution.`;
-         newState.challengeOrBlockPhase = null; // Clear invalid phase
+         if (isValidGameStateInternal(newState)) newState.challengeOrBlockPhase = null; // Clear invalid phase if state is valid
          return createErrorState(errorMsg, newState);
      }
 
@@ -1163,7 +1166,7 @@ export async function handleChallengeDecision(gameState: GameState | null, chall
 
      if(!challengedPlayer || !challenger) {
          const errorMsg = `[handleChallengeDecision] Error: Challenged player (${challengedPlayerId}) or challenger (${pendingDecision.challengerId}) not found.`;
-          newState.pendingChallengeDecision = null; // Clear invalid phase
+          if (isValidGameStateInternal(newState)) newState.pendingChallengeDecision = null; // Clear invalid phase if state is valid
          return createErrorState(errorMsg, newState);
      }
 
@@ -1411,10 +1414,16 @@ async function executeChallengeResolution(gameState: GameState, challengedPlayer
 
 
 export async function processPendingActionAfterReveal(gameState: GameState | null): Promise<GameState> {
-      if (!isValidGameStateInternal(gameState) || !gameState.pendingActionAfterReveal) {
-         // console.log("[processPendingActionAfterReveal] No pending action found or invalid state."); // Too noisy
-         return gameState || createErrorState("[processPendingActionAfterReveal] Error: gameState is null or invalid and no pending action.");
+      if (!isValidGameStateInternal(gameState)) {
+         // This might happen if createErrorState was called previously
+         console.warn("[processPendingActionAfterReveal] Called with invalid or null gameState. Returning as is.");
+         return gameState || createErrorState("[processPendingActionAfterReveal] Error: gameState is null or invalid."); // Return error state if null
      }
+     if(!gameState.pendingActionAfterReveal) {
+         console.log("[processPendingActionAfterReveal] No pending action found.");
+         return gameState;
+     }
+
     console.log("[processPendingActionAfterReveal] Processing action after reveal...");
     let newState = JSON.parse(JSON.stringify(gameState));
     const stateBeforeProcess = JSON.parse(JSON.stringify(gameState)); // Fallback
@@ -2221,6 +2230,23 @@ async function triggerAIResponses(gameState: GameState | null): Promise<GameStat
             newState = logAction(newState, `AI (${aiPlayerState.name}) responds: ${decision}.`); // Only log decision for brevity in game log
             console.log(`[triggerAIResponses] AI ${aiPlayerState.name} final response: ${decision}. Reasoning: ${reasoning}`);
 
+             // --- Context Check before handling block ---
+             // Check only if the decided response is a block
+             if (decidedResponseType === 'Block') {
+                const originalActionPlayerFromContext = newState.currentAction?.player;
+                if (!originalActionPlayerFromContext) {
+                    const errorMsg = `[triggerAIResponses] CRITICAL ERROR: AI ${aiPlayerState.name} decided to block, but currentAction context is missing! Reverting block decision to Allow.`;
+                    console.error(errorMsg);
+                    newState = logAction(newState, errorMsg);
+                    decision = 'Allow'; // Revert to Allow
+                    decidedResponseType = 'Allow';
+                 } else {
+                      console.log(`[triggerAIResponses] Block decision context check OK. Original action player: ${originalActionPlayerFromContext.name}`);
+                 }
+            }
+            // --- End Context Check ---
+
+
             // IMPORTANT: Update the state by calling handlePlayerResponseLogic, which correctly modifies the phase state
             // and potentially resolves the phase or sets up the next challenge/stage.
              const stateAfterResponse = await handlePlayerResponseLogic(newState, aiPlayerState.id, decision); // Await the handling
@@ -2293,8 +2319,8 @@ async function handleAIExchange(gameState: GameState | null): Promise<GameState>
      if (!exchangeInfo || !exchangeInfo.player.isAI) {
          const errorMsg = "[handleAIExchange] Error: Called without valid AI exchange phase.";
           // Try to clear invalid phase
-          const stateWithError = logAction(newState, errorMsg);
-          if(stateWithError) stateWithError.pendingExchange = null;
+          let stateWithError = logAction(newState, errorMsg);
+          if(isValidGameStateInternal(stateWithError)) stateWithError.pendingExchange = null; // Check validity before modifying
           return stateWithError || createErrorState(errorMsg, gameState);
      }
 
@@ -2327,7 +2353,7 @@ async function handleAIExchange(gameState: GameState | null): Promise<GameState>
          const errorMsg = `[handleAIExchange] Error during completeExchange: ${error.message}. Reverting exchange.`;
          console.error(errorMsg);
          newState = createErrorState(errorMsg, stateBeforeExchange); // Ensure valid state
-          if(newState) newState.pendingExchange = null; // Clear broken phase
+          if(isValidGameStateInternal(newState)) newState.pendingExchange = null; // Clear broken phase if state valid
     }
 
      return newState;
@@ -2448,14 +2474,14 @@ async function handleAIAssassinationConfirmation(gameState: GameState): Promise<
     try {
         stateAfterHandling = await handleAssassinationConfirmation(newState, assassinPlayer.id, decision);
     } catch (error: any) {
-         const errorMsg = `[handleAIAssassinationConfirmation] Error calling handleAssassinationConfirmation: ${error.message}. Reverting.`;
+         const errorMsg = `[handleAssassinationConfirmation] Error calling handleAssassinationConfirmation: ${error.message}. Reverting.`;
          console.error(errorMsg);
          stateAfterHandling = createErrorState(errorMsg, stateBeforeConfirm);
     }
 
      // Final check
      if (!isValidGameStateInternal(stateAfterHandling)) {
-         console.error("[handleAIAssassinationConfirmation] Error: stateAfterHandling became invalid. Reverting.");
+         console.error("[handleAIAssassinationConfirmation] Error: newState became invalid. Reverting.");
          return createErrorState("[handleAIAssassinationConfirmation] Internal error after handling AI confirmation.", stateBeforeConfirm);
      }
 
@@ -2585,7 +2611,7 @@ export async function performAction(gameState: GameState | null, playerId: strin
                 console.error(errorMsg);
                 newState = logAction(newState, errorMsg);
                 // Clear invalid action state
-                newState.currentAction = null;
+                if(isValidGameStateInternal(newState)) newState.currentAction = null;
                 stateAfterActionExecution = newState; // Return the logged error state
                 break;
         }
@@ -2704,6 +2730,15 @@ export async function handlePlayerResponseLogic(gameState: GameState | null, res
         } else if (response.startsWith('Block')) {
             // A block was issued.
              console.log(`[API handlePlayerResponseLogic] Block (${response}) issued by ${respondingPlayer.name}.`);
+
+              // Check if the currentAction context exists
+              if (!newState.currentAction) {
+                   // Log the error
+                   console.error("[handlePlayerResponseLogic] CRITICAL ERROR: Player attempted to block but currentAction is null!");
+                   newState = logAction(newState, `[handlePlayerResponseLogic] Error: Player attempted to block, but game state is corrupted.  Forcing 'Allow' to prevent getting stuck.`);
+                   return await handlePlayerResponseLogic(newState, respondingPlayerId, 'Allow');
+              }
+
               const blocker = getPlayerById(newState, respondingPlayerId)!; // Blocker is the responder
               const blockType = response as BlockActionType;
                // The player whose original action is being blocked comes from the currentAction context
@@ -2850,7 +2885,7 @@ export async function handleExchangeSelection(gameState: GameState | null, playe
          const errorMsgLog = `[API handleExchangeSelection] Critical error during completeExchange: ${error.message}. Reverting.`;
         console.error(errorMsgLog);
         stateAfterExchange = createErrorState(errorMsgLog, stateBeforeExchange); // Ensure valid state
-        if (stateAfterExchange) {
+        if (isValidGameStateInternal(stateAfterExchange)) { // Check validity before modifying
             stateAfterExchange.pendingExchange = null; // Clean up phase
         }
      }
@@ -2880,7 +2915,7 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     if (!assassin || !contessaPlayer) {
         const errorMsg = `[handleAssassinationConfirmation] Error: Assassin or Contessa player not found.`;
-        newState.pendingAssassinationConfirmation = null; // Clear invalid phase
+        if (isValidGameStateInternal(newState)) newState.pendingAssassinationConfirmation = null; // Clear invalid phase if state valid
         return createErrorState(errorMsg, newState);
     }
 
@@ -2917,7 +2952,7 @@ export async function handleAssassinationConfirmation(gameState: GameState | nul
 
     if (!isValidGameStateInternal(newState)) {
         console.error("[handleAssassinationConfirmation] Error: newState became invalid. Reverting.");
-        return createErrorState("[handleAssassinationConfirmation] Internal error after handling confirmation.", stateBeforeConfirm);
+        return createErrorState("[handleAssassinationConfirmation] Internal error after handling AI confirmation.", stateBeforeConfirm);
     }
 
     return newState;
