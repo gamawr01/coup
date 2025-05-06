@@ -18,6 +18,7 @@ body {
   #28B463 (Verde do Embaixador) -> hsl(146, 62%, 43%) -> Lighter for accent: hsl(146, 62%, 48%)
   #C0392B (Carmim da Condessa) -> hsl(7, 65%, 46%) -> Lighter for destructive: hsl(7, 65%, 50%)
   #4A235A (Roxo do Assassino - not used directly in main palette)
+  #229C6D (New Primary Green) -> hsl(157, 63%, 37%)
 */
 
 @layer base {
@@ -32,8 +33,8 @@ body {
     --popover: 200 17% 100%; /* White */
     --popover-foreground: 210 30% 24%; /* Azul-escuro neutro */
 
-    --primary: 358 69% 40%; /* #9B1D20 Vermelho do Duque */
-    --primary-foreground: 200 17% 96%; /* Branco suave */
+    --primary: 157 63% 37%; /* #229C6D New Primary Green */
+    --primary-foreground: 200 17% 96%; /* Branco suave - good contrast with new primary */
 
     --secondary: 203 64% 35%; /* #1A5276 Azul do Capitão */
     --secondary-foreground: 200 17% 96%; /* Branco suave */
@@ -49,10 +50,10 @@ body {
 
     --border: 45 65% 52%; /* #D4AF37 Dourado */
     --input: 210 16% 90%; /* Lighter Gray Input Background */
-    --ring: 45 65% 52%; /* Dourado Focus Ring */
+    --ring: 157 63% 37%; /* #229C6D New Primary Green for Focus Ring */
 
     /* Chart colors - using theme colors */
-    --chart-1: 358 69% 40%;   /* Deep Red */
+    --chart-1: 157 63% 37%;   /* New Primary Green */
     --chart-2: 203 64% 35%; /* Rich Blue */
     --chart-3: 146 62% 48%; /* Green */
     --chart-4: 45 65% 52%; /* Gold */
@@ -72,7 +73,7 @@ body {
     --popover: 210 30% 12%; /* Even Darker popover */
     --popover-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --primary: 358 69% 50%; /* #9B1D20 Vermelho do Duque (brighter for dark mode) */
+    --primary: 157 63% 42%; /* #229C6D New Primary Green (slightly brighter for dark mode) */
     --primary-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
     --secondary: 203 64% 45%; /* #1A5276 Azul do Capitão (brighter for dark mode) */
@@ -89,10 +90,10 @@ body {
 
     --border: 45 65% 60%; /* #D4AF37 Dourado (brighter for dark mode) */
     --input: 210 30% 20%; /* Darker Slate Input Background */
-    --ring: 45 65% 65%; /* Dourado focus ring */
+    --ring: 157 63% 47%; /* #229C6D New Primary Green Focus Ring (brighter for dark) */
 
     /* Chart colors - using theme colors where appropriate */
-    --chart-1: 358 69% 50%;   /* Red */
+    --chart-1: 157 63% 42%;   /* New Primary Green */
     --chart-2: 203 64% 45%; /* Blue */
     --chart-3: 146 62% 55%; /* Green */
     --chart-4: 45 65% 60%; /* Gold */
