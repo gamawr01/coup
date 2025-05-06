@@ -9,8 +9,8 @@ body {
 
 @layer base {
   :root {
-    /* New Light Theme: Shades of Gray with Character Colors */
-    --background: 220 10% 95%; /* Very Light Cool Gray */
+    /* Updated Light Theme: Shades of Light Gray with Character Colors */
+    --background: 0 0% 98%; /* Very Light Gray (Almost White) */
     --foreground: 220 10% 20%; /* Dark Cool Gray */
 
     --card: 0 0% 100%; /* White */
@@ -25,8 +25,8 @@ body {
     --secondary: 260 60% 60%; /* Duke Purple */
     --secondary-foreground: 0 0% 100%; /* White */
 
-    --muted: 220 10% 75%; /* Medium Cool Gray */
-    --muted-foreground: 220 10% 45%; /* Slightly darker muted gray */
+    --muted: 0 0% 92%; /* Lighter Gray for muted backgrounds */
+    --muted-foreground: 0 0% 45%; /* Slightly darker muted gray text */
 
     --accent: 145 65% 40%; /* Ambassador Green */
     --accent-foreground: 0 0% 100%; /* White */
@@ -34,8 +34,8 @@ body {
     --destructive: 0 75% 55%; /* Contessa Red */
     --destructive-foreground: 0 0% 100%; /* White */
 
-    --border: 220 10% 88%; /* Light Cool Gray Border */
-    --input: 220 10% 92%; /* Slightly off-white/light gray input */
+    --border: 0 0% 88%; /* Light Gray Border */
+    --input: 0 0% 95%; /* Slightly off-white/light gray input */
     --ring: 221 83% 53%; /* Primary blue for focus ring */
 
     /* Chart colors - based on character colors */
