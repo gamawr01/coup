@@ -3,63 +3,89 @@
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: 'Georgia', 'Times New Roman', Times, serif; /* More classic font */
+  background-color: hsl(var(--background)); /* Ensure body background is set */
 }
 
 @layer base {
   :root {
-    --background: 45 70% 96%; /* Creamy off-white */
-    --foreground: 30 25% 15%; /* Dark Brown/Charcoal */
-    --card: 45 60% 92%; /* Slightly darker cream for cards */
-    --card-foreground: 30 25% 15%;
-    --popover: 45 60% 92%;
-    --popover-foreground: 30 25% 15%;
-    --primary: 170 50% 30%; /* Dark Teal */
-    --primary-foreground: 45 70% 96%; /* Light Cream */
-    --secondary: 30 15% 85%; /* Muted warm gray for secondary elements */
-    --secondary-foreground: 30 20% 25%; /* Darker text for secondary */
-    --muted: 30 15% 85%;
-    --muted-foreground: 30 15% 45%; /* Muted text */
-    --accent: 0 40% 35%; /* Reddish-Maroon */
-    --accent-foreground: 45 70% 96%; /* Light Cream */
-    --destructive: 0 60% 45%; /* A slightly deeper red */
-    --destructive-foreground: 0 0% 98%;
-    --border: 30 25% 75%; /* Muted brown-gray border */
-    --input: 30 30% 90%; /* Lighter input background */
-    --ring: 170 50% 30%; /* Dark Teal for focus rings */
-    --chart-1: 170 50% 40%; /* Teal variants for charts */
-    --chart-2: 0 40% 45%;   /* Maroon variants for charts */
-    --chart-3: 40 70% 60%;  /* Yellow/Orange from character highlights */
-    --chart-4: 320 60% 50%; /* Magenta/Pink from character ruff */
-    --chart-5: 210 30% 50%; /* Muted Blue from character hats/clothes */
+    /* Coup Theme - Light Mode (Reference: Physical game box/cards) */
+    --background: 35 30% 90%; /* Light Parchment / Aged Paper */
+    --foreground: 30 60% 10%; /* Dark Brown / Near Black */
+
+    --card: 35 40% 85%; /* Slightly darker parchment for cards */
+    --card-foreground: 30 60% 10%; /* Dark Brown text on cards */
+
+    --popover: 30 20% 96%; /* Very Light, almost white */
+    --popover-foreground: 30 60% 10%;
+
+    --primary: 0 60% 40%; /* Deep Red (like Assassin/Contessa cards) */
+    --primary-foreground: 35 30% 95%; /* Light Parchment for text on red */
+
+    --secondary: 45 20% 70%; /* Muted Gold/Tan */
+    --secondary-foreground: 30 60% 10%; /* Dark text on gold */
+
+    --muted: 35 25% 80%; /* Lighter muted parchment */
+    --muted-foreground: 30 40% 30%; /* Muted Brown text */
+
+    --accent: 210 50% 45%; /* Rich Blue (like Captain card) */
+    --accent-foreground: 35 30% 95%; /* Light Parchment for text on blue */
+
+    --destructive: 0 70% 50%; /* Slightly brighter Red for destructive actions */
+    --destructive-foreground: 35 30% 95%;
+
+    --border: 30 30% 60%; /* Brownish border */
+    --input: 35 40% 88%; /* Input background slightly off parchment */
+    --ring: 0 60% 50%; /* Red focus ring */
+
+    /* Chart colors - adjust based on card colors */
+    --chart-1: 0 60% 45%;   /* Red (Assassin/Contessa) */
+    --chart-2: 210 55% 50%; /* Blue (Captain) */
+    --chart-3: 120 40% 40%; /* Green (Ambassador) */
+    --chart-4: 270 40% 50%; /* Purple (Duke) */
+    --chart-5: 45 30% 60%;  /* Gold/Tan (General/Coins) */
+
     --radius: 0.5rem;
   }
 
   .dark {
+     /* Coup Theme - Dark Mode (Maintain similar feel) */
     --background: 30 15% 12%; /* Very Dark Brown/Almost Black */
-    --foreground: 45 50% 88%; /* Off-white/Light Cream text */
-    --card: 30 10% 18%; /* Darker Brown for cards */
-    --card-foreground: 45 50% 88%;
-    --popover: 30 10% 18%;
-    --popover-foreground: 45 50% 88%;
-    --primary: 170 55% 45%; /* Slightly brighter Teal for dark mode */
-    --primary-foreground: 30 10% 10%; /* Dark text on primary */
-    --secondary: 30 10% 25%; /* Darker muted brown-gray */
-    --secondary-foreground: 45 50% 80%; /* Lighter text for secondary */
-    --muted: 30 10% 25%;
-    --muted-foreground: 45 40% 60%; /* Muted text */
-    --accent: 0 50% 50%; /* Brighter Reddish-Maroon for dark mode */
-    --accent-foreground: 30 10% 10%; /* Dark text on accent */
-    --destructive: 0 60% 55%; /* A brighter red for destructive actions in dark mode */
-    --destructive-foreground: 0 0% 98%;
-    --border: 30 15% 30%; /* Darker border */
-    --input: 30 10% 22%; /* Darker input background */
-    --ring: 170 55% 45%; /* Teal for focus rings */
-    --chart-1: 170 60% 55%;
-    --chart-2: 0 50% 60%;
-    --chart-3: 40 80% 70%;
-    --chart-4: 320 70% 65%;
-    --chart-5: 210 40% 60%;
+    --foreground: 35 25% 88%; /* Off-white/Light Parchment text */
+
+    --card: 30 12% 18%; /* Darker Brown for cards */
+    --card-foreground: 35 25% 88%;
+
+    --popover: 30 10% 15%; /* Even darker popover */
+    --popover-foreground: 35 25% 88%;
+
+    --primary: 0 65% 55%; /* Slightly brighter Red */
+    --primary-foreground: 0 0% 10%; /* Dark text on red */
+
+    --secondary: 45 25% 40%; /* Darker Muted Gold/Tan */
+    --secondary-foreground: 35 25% 90%; /* Lighter text */
+
+    --muted: 30 10% 25%; /* Darker muted brown-gray */
+    --muted-foreground: 35 30% 65%; /* Muted text */
+
+    --accent: 210 60% 55%; /* Slightly brighter Blue */
+    --accent-foreground: 210 10% 10%; /* Dark text on blue */
+
+    --destructive: 0 70% 60%; /* Brighter Red */
+    --destructive-foreground: 0 0% 10%;
+
+    --border: 30 15% 35%; /* Darker border */
+    --input: 30 12% 22%; /* Darker input background */
+    --ring: 0 70% 60%; /* Red focus ring */
+
+    /* Chart colors - brighter versions */
+    --chart-1: 0 65% 60%;
+    --chart-2: 210 60% 60%;
+    --chart-3: 120 45% 50%;
+    --chart-4: 270 50% 60%;
+    --chart-5: 45 35% 70%;
+
+    --radius: 0.5rem;
   }
 }
 
