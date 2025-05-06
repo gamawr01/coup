@@ -45,8 +45,9 @@ const InfluenceCardDisplay: React.FC<{ card: InfluenceCard; playerId: string; hu
 
   const showDetails = (card?.revealed || isHumanPlayerCard) && baseInfo;
 
-  const bgColor = card?.revealed ? 'bg-muted opacity-60' : (showDetails && baseInfo ? baseInfo.color : 'bg-gray-700'); // Default to gray for hidden AI cards
-  const textColor = card?.revealed ? 'text-muted-foreground line-through' : (showDetails ? 'text-primary-foreground' : 'text-gray-300'); // Default text for hidden AI cards
+  const bgColor = card?.revealed ? 'bg-muted opacity-60' : (showDetails && baseInfo ? baseInfo.color : 'bg-gray-500'); // Darker gray for hidden AI cards in light mode
+  const textColor = card?.revealed ? 'text-muted-foreground line-through' : (showDetails ? 'text-primary-foreground' : 'text-gray-100'); // Lighter text for hidden AI cards
+
   const iconToShow = showDetails && baseInfo ? React.cloneElement(baseInfo.icon as React.ReactElement, { className: "w-10 h-10" }) : <HelpCircle className="w-10 h-10 text-muted-foreground" />;
 
 
@@ -65,16 +66,16 @@ const InfluenceCardDisplay: React.FC<{ card: InfluenceCard; playerId: string; hu
 
 
 const PlayerInfo: React.FC<{ player: Player; isCurrentPlayer: boolean; humanPlayerId: string }> = ({ player, isCurrentPlayer, humanPlayerId }) => (
-  <Card className={`mb-4 rounded-xl ${isCurrentPlayer ? 'border-primary border-4 shadow-2xl ring-4 ring-primary ring-opacity-50' : 'shadow-lg border-2 border-black'} ${player.influence.every(c => c.revealed) ? 'opacity-50 bg-stone-700' : 'bg-stone-800'} transition-all duration-300`}>
+  <Card className={`mb-4 rounded-xl ${isCurrentPlayer ? 'border-primary border-4 shadow-2xl ring-4 ring-primary ring-opacity-50' : 'shadow-lg border-2 border-black'} ${player.influence.every(c => c.revealed) ? 'opacity-50 bg-muted' : 'bg-card'} transition-all duration-300`}>
     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0 pt-4 px-4">
       <div className="flex items-center gap-3">
-        <Avatar className="h-12 w-12 border-2 border-yellow-500">
+        <Avatar className="h-12 w-12 border-2 border-border">
            <AvatarImage src={`https://picsum.photos/seed/${player.id}/48/48`} data-ai-hint="player avatar"/>
-           <AvatarFallback className="bg-yellow-600 text-white font-bold">{player.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+           <AvatarFallback className="bg-primary text-primary-foreground font-bold">{player.name.substring(0, 1).toUpperCase()}</AvatarFallback>
         </Avatar>
-        <CardTitle className="text-xl font-bold text-yellow-400">{player.name} {player.id === humanPlayerId ? <Badge variant="secondary" className="ml-1 bg-yellow-500 text-black">Você</Badge> : (player.isAI ? <Badge variant="outline" className="ml-1 border-yellow-600 text-yellow-300">IA</Badge> : '')}</CardTitle>
+        <CardTitle className="text-xl font-bold text-card-foreground">{player.name} {player.id === humanPlayerId ? <Badge variant="secondary" className="ml-1">Você</Badge> : (player.isAI ? <Badge variant="outline" className="ml-1">IA</Badge> : '')}</CardTitle>
       </div>
-      <div className="text-2xl font-bold flex items-center text-yellow-400">
+      <div className="text-2xl font-bold flex items-center text-card-foreground">
         <Coins className="w-7 h-7 mr-1.5 text-yellow-500" /> {player.money}
       </div>
     </CardHeader>
@@ -84,21 +85,21 @@ const PlayerInfo: React.FC<{ player: Player; isCurrentPlayer: boolean; humanPlay
           <InfluenceCardDisplay key={`${player.id}-influence-${index}`} card={card} playerId={player.id} humanPlayerId={humanPlayerId} />
         ))}
       </div>
-       {player.influence.every(c => c.revealed) && <p className="text-base text-red-500 mt-3 text-center font-extrabold tracking-wider uppercase">Eliminado</p>}
+       {player.influence.every(c => c.revealed) && <p className="text-base text-destructive mt-3 text-center font-extrabold tracking-wider uppercase">Eliminado</p>}
     </CardContent>
   </Card>
 );
 
 
 const ActionLog: React.FC<{ logs: string[] }> = ({ logs }) => (
-  <Card className="h-64 bg-stone-800 border-2 border-black shadow-lg rounded-xl">
+  <Card className="h-64 bg-card border-2 border-black shadow-lg rounded-xl">
     <CardHeader className="pt-4 pb-2 px-4">
-      <CardTitle className="text-xl text-yellow-400">Registro de Ações</CardTitle>
+      <CardTitle className="text-xl text-card-foreground">Registro de Ações</CardTitle>
     </CardHeader>
     <CardContent className="h-full pb-4 px-4">
       <ScrollArea className="h-40 pr-4">
         {logs.slice().reverse().map((log, index) => (
-          <p key={index} className="text-sm text-stone-300 mb-1.5 leading-relaxed border-b border-stone-700 pb-1">{log}</p>
+          <p key={index} className="text-sm text-muted-foreground mb-1.5 leading-relaxed border-b border-border/50 pb-1">{log}</p>
         ))}
       </ScrollArea>
     </CardContent>
@@ -183,49 +184,49 @@ const ActionButtons: React.FC<{
                             (actionsNeedingTarget.includes(action) && activeOpponents.length === 0)
                         }
                         variant={mustCoup && action !== 'Coup' ? 'outline' : 'default'}
-                        className={`flex items-center justify-start gap-2 text-base py-3 pl-4 rounded-lg border-2 border-black shadow-md hover:shadow-lg transition-all duration-200 ${
-                            mustCoup && action !== 'Coup' ? 'cursor-not-allowed opacity-60 bg-gray-600' : 'bg-yellow-500 text-black hover:bg-yellow-600'
-                        }`}
+                         className={`flex items-center justify-start gap-2 text-base py-3 pl-4 rounded-lg border-2 border-black shadow-md hover:shadow-lg transition-all duration-200 ${
+                           mustCoup && action !== 'Coup' ? 'cursor-not-allowed opacity-60 bg-gray-400' : ''
+                        }`} // Adjusted disabled style for light theme
                         size="lg"
                     >
                         <div className="w-5 h-5 flex items-center justify-center">
                             {React.cloneElement(actionIcons[action] as React.ReactElement, { className: "w-5 h-5" })}
                         </div>
                         <span className="flex-1 text-left font-semibold">{action}</span>
-                         {action === 'Income' && <Badge variant="secondary" className="ml-auto bg-green-700 text-white">+1</Badge>}
-                         {action === 'Foreign Aid' && <Badge variant="secondary" className="ml-auto bg-green-700 text-white">+2</Badge>}
-                         {action === 'Coup' && <Badge variant="destructive" className="ml-auto bg-red-700 text-white">-7</Badge>}
-                         {action === 'Tax' && <Badge variant="secondary" className="ml-auto bg-green-700 text-white">+3</Badge>}
-                         {action === 'Assassinate' && <Badge variant="destructive" className="ml-auto bg-red-700 text-white">-3</Badge>}
-                         {action === 'Steal' && <Badge variant="outline" className="ml-auto border-yellow-600 text-yellow-300">vs</Badge>}
-                         {action === 'Exchange' && <Badge variant="outline" className="ml-auto border-blue-600 text-blue-300">Swap</Badge>}
+                         {action === 'Income' && <Badge variant="secondary" className="ml-auto">+1</Badge>}
+                         {action === 'Foreign Aid' && <Badge variant="secondary" className="ml-auto">+2</Badge>}
+                         {action === 'Coup' && <Badge variant="destructive" className="ml-auto">-7</Badge>}
+                         {action === 'Tax' && <Badge variant="secondary" className="ml-auto">+3</Badge>}
+                         {action === 'Assassinate' && <Badge variant="destructive" className="ml-auto">-3</Badge>}
+                         {action === 'Steal' && <Badge variant="outline" className="ml-auto">vs</Badge>}
+                         {action === 'Exchange' && <Badge variant="outline" className="ml-auto">Swap</Badge>}
                     </Button>
                 ))}
             </div>
 
              <AlertDialog open={showTargetDialog} onOpenChange={setShowTargetDialog}>
-                 <AlertDialogContent className="bg-stone-800 border-black text-yellow-400">
+                 <AlertDialogContent className="bg-background border-black text-foreground">
                      <AlertDialogHeader>
-                         <AlertDialogTitle className="text-yellow-500">Selecionar Alvo para {selectedAction}</AlertDialogTitle>
-                         <AlertDialogDescription className="text-stone-300">
+                         <AlertDialogTitle className="text-primary">Selecionar Alvo para {selectedAction}</AlertDialogTitle>
+                         <AlertDialogDescription className="text-muted-foreground">
                              Escolha qual jogador será alvo da ação {selectedAction}.
                          </AlertDialogDescription>
                      </AlertDialogHeader>
                      <Select onValueChange={setSelectedTarget} value={selectedTarget}>
-                         <SelectTrigger className="w-full bg-stone-700 border-black text-yellow-400">
+                         <SelectTrigger className="w-full bg-input border-black text-foreground">
                              <SelectValue placeholder="Selecione um jogador..." />
                          </SelectTrigger>
-                         <SelectContent className="bg-stone-700 border-black text-yellow-400">
+                         <SelectContent className="bg-popover border-black text-popover-foreground">
                              {activeOpponents.map(opponent => (
-                                 <SelectItem key={opponent.id} value={opponent.id} className="hover:bg-stone-600 focus:bg-stone-600">
+                                 <SelectItem key={opponent.id} value={opponent.id} className="hover:bg-accent focus:bg-accent">
                                      {opponent.name} ({opponent.money} moedas, {opponent.influence.filter(inf => !inf.revealed).length} influência)
                                  </SelectItem>
                              ))}
                          </SelectContent>
                      </Select>
                      <AlertDialogFooter>
-                         <AlertDialogCancel onClick={handleTargetCancel} className="bg-stone-600 hover:bg-stone-500 border-black text-yellow-300">Cancelar</AlertDialogCancel>
-                         <AlertDialogAction onClick={handleTargetConfirm} disabled={!selectedTarget} className="bg-yellow-500 hover:bg-yellow-600 text-black">
+                         <AlertDialogCancel onClick={handleTargetCancel} className="bg-muted hover:bg-muted/90 border-black text-muted-foreground">Cancelar</AlertDialogCancel>
+                         <AlertDialogAction onClick={handleTargetConfirm} disabled={!selectedTarget} className="bg-primary hover:bg-primary/90 text-primary-foreground">
                              Confirmar Alvo
                          </AlertDialogAction>
                      </AlertDialogFooter>
@@ -295,24 +296,24 @@ const ResponsePrompt: React.FC<{
 
 
     return (
-        <Card className="mt-4 border-yellow-500 border-4 shadow-lg bg-stone-800 rounded-xl p-5">
+        <Card className="mt-4 border-border border-4 shadow-lg bg-card rounded-xl p-5">
             <CardHeader className="p-0 mb-4">
-                <CardTitle className="text-xl text-yellow-400">{title}</CardTitle>
-                <CardDescription className="text-base text-stone-300">{promptText}</CardDescription>
+                <CardTitle className="text-xl text-primary">{title}</CardTitle>
+                <CardDescription className="text-base text-card-foreground">{promptText}</CardDescription>
             </CardHeader>
             <CardContent className="p-0 flex gap-3 justify-center flex-wrap">
                  {validResponses.includes('Allow') && (
-                    <Button onClick={() => onResponse('Allow')} variant="secondary" size="lg" className="bg-green-600 hover:bg-green-700 text-white border-black border-2">
+                    <Button onClick={() => onResponse('Allow')} variant="secondary" size="lg" className="bg-accent hover:bg-accent/90 text-accent-foreground border-black border-2">
                         <Check className="w-5 h-5 mr-2" /> Permitir
                     </Button>
                  )}
                  {validResponses.includes('Challenge') && (
-                     <Button onClick={() => onResponse('Challenge')} variant="destructive" size="lg" className="bg-red-600 hover:bg-red-700 text-white border-black border-2">
+                     <Button onClick={() => onResponse('Challenge')} variant="destructive" size="lg" className="bg-destructive hover:bg-destructive/90 text-destructive-foreground border-black border-2">
                          <HelpCircle className="w-5 h-5 mr-2" /> Desafiar
                      </Button>
                  )}
                  {validResponses.filter(r => r.startsWith('Block')).map(blockResponse => (
-                     <Button key={blockResponse} onClick={() => onResponse(blockResponse as GameResponseType)} variant="outline" size="lg" className="bg-blue-600 hover:bg-blue-700 text-white border-black border-2">
+                     <Button key={blockResponse} onClick={() => onResponse(blockResponse as GameResponseType)} variant="outline" size="lg" className="bg-secondary hover:bg-secondary/90 text-secondary-foreground border-black border-2">
                          <Ban className="w-5 h-5 mr-2" /> {blockResponse}
                      </Button>
                  ))}
@@ -358,10 +359,10 @@ const ExchangePrompt: React.FC<{
      };
 
     return (
-        <Card className="mt-4 border-blue-500 border-4 shadow-lg bg-stone-800 rounded-xl p-5">
+        <Card className="mt-4 border-secondary border-4 shadow-lg bg-card rounded-xl p-5">
             <CardHeader className="p-0 mb-4">
-                <CardTitle className="text-xl text-blue-400">Trocar Cartas</CardTitle>
-                <CardDescription className="text-base text-stone-300">Escolha {currentInfluenceCount} carta(s) para manter. O resto será devolvido ao baralho.</CardDescription>
+                <CardTitle className="text-xl text-secondary">Trocar Cartas</CardTitle>
+                <CardDescription className="text-base text-card-foreground">Escolha {currentInfluenceCount} carta(s) para manter. O resto será devolvido ao baralho.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
                 <div className="flex flex-wrap gap-3 justify-center mb-4">
@@ -373,7 +374,7 @@ const ExchangePrompt: React.FC<{
                                 key={`${card}-${originalIndex}`}
                                 variant={isSelected ? 'default' : 'outline'}
                                 onClick={() => handleCardToggle(originalIndex)}
-                                className={`flex items-center gap-2 text-base py-3 px-4 rounded-lg border-2 border-black ${isSelected ? 'bg-yellow-500 text-black' : 'bg-stone-700 text-yellow-300 hover:bg-stone-600'}`}
+                                 className={`flex items-center gap-2 text-base py-3 px-4 rounded-lg border-2 border-black ${isSelected ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:bg-muted/90'}`}
                                 size="lg"
                               >
                                  {info ? React.cloneElement(info.icon as React.ReactElement, { className: "w-5 h-5" }) : <HelpCircle className="w-5 h-5"/>} {info?.name || 'Desconhecido'}
@@ -381,7 +382,7 @@ const ExchangePrompt: React.FC<{
                          );
                     })}
                 </div>
-                 <Button onClick={handleConfirm} disabled={!canConfirm} className="w-full bg-blue-600 hover:bg-blue-700 text-white border-black border-2" size="lg">
+                 <Button onClick={handleConfirm} disabled={!canConfirm} className="w-full bg-secondary hover:bg-secondary/90 text-secondary-foreground border-black border-2" size="lg">
                      Confirmar Seleção
                  </Button>
             </CardContent>
@@ -410,16 +411,16 @@ const ForcedRevealPrompt: React.FC<{
     }
 
     return (
-        <Card className="mt-4 border-red-500 border-4 shadow-lg bg-stone-800 rounded-xl p-5">
+        <Card className="mt-4 border-destructive border-4 shadow-lg bg-card rounded-xl p-5">
             <CardHeader className="p-0 mb-4">
-                <CardTitle className="text-xl text-red-400">Revelar Influência</CardTitle>
-                <CardDescription className="text-base text-stone-300">Você perdeu um desafio ou foi alvo de um Coup/Assassinato bem-sucedido. Escolha qual influência revelar.</CardDescription>
+                <CardTitle className="text-xl text-destructive">Revelar Influência</CardTitle>
+                <CardDescription className="text-base text-card-foreground">Você perdeu um desafio ou foi alvo de um Coup/Assassinato bem-sucedido. Escolha qual influência revelar.</CardDescription>
             </CardHeader>
             <CardContent className="p-0 flex gap-3 justify-center">
                 {unrevealedCards.map((card, index) => {
                      const info = card?.type ? cardInfo[card.type] : null;
                      return (
-                         <Button key={index} onClick={() => card.type && onForceReveal(card.type)} variant="destructive" className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white border-black border-2" size="lg" disabled={!card.type}>
+                         <Button key={index} onClick={() => card.type && onForceReveal(card.type)} variant="destructive" className="flex items-center gap-2 bg-destructive hover:bg-destructive/90 text-destructive-foreground border-black border-2" size="lg" disabled={!card.type}>
                             {info ? React.cloneElement(info.icon as React.ReactElement, { className: "w-5 h-5" }) : <HelpCircle className="w-5 h-5"/>} Revelar {info?.name || 'Desconhecido'}
                          </Button>
                      )
@@ -451,19 +452,19 @@ const ChallengeDecisionPrompt: React.FC<{
     if (!challenger) return null;
 
     return (
-        <Card className="mt-4 border-orange-500 border-4 shadow-lg bg-stone-800 rounded-xl p-5">
+        <Card className="mt-4 border-orange-500 border-4 shadow-lg bg-card rounded-xl p-5">
             <CardHeader className="p-0 mb-4">
-                <CardTitle className="text-xl text-orange-400">Decisão de Desafio!</CardTitle>
-                <CardDescription className="text-base text-stone-300">
+                <CardTitle className="text-xl text-orange-500">Decisão de Desafio!</CardTitle>
+                <CardDescription className="text-base text-card-foreground">
                     {challenger.name} desafiou sua alegação de {actionOrBlockDisplayName}.
                     Você quer prosseguir (revelar carta ou perder influência se estiver blefando) ou recuar (cancelar a ação/bloqueio)?
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-0 flex gap-3 justify-center">
-                <Button onClick={() => onChallengeDecision('Proceed')} variant="default" size="lg" className="bg-green-600 hover:bg-green-700 text-white border-black border-2">
+                <Button onClick={() => onChallengeDecision('Proceed')} variant="default" size="lg" className="bg-accent hover:bg-accent/90 text-accent-foreground border-black border-2">
                     <ShieldCheck className="w-5 h-5 mr-2" /> Prosseguir
                 </Button>
-                <Button onClick={() => onChallengeDecision('Retreat')} variant="outline" size="lg" className="bg-gray-600 hover:bg-gray-500 text-white border-black border-2">
+                <Button onClick={() => onChallengeDecision('Retreat')} variant="outline" size="lg" className="bg-muted hover:bg-muted/90 text-muted-foreground border-black border-2">
                     <ShieldAlert className="w-5 h-5 mr-2" /> Recuar
                 </Button>
             </CardContent>
@@ -487,19 +488,19 @@ const AssassinationConfirmationPrompt: React.FC<{
     if (!contessaPlayer) return null;
 
     return (
-        <Card className="mt-4 border-red-500 border-4 shadow-lg bg-stone-800 rounded-xl p-5">
+        <Card className="mt-4 border-destructive border-4 shadow-lg bg-card rounded-xl p-5">
             <CardHeader className="p-0 mb-4">
-                <CardTitle className="text-xl text-red-400">Assassinato Bloqueado!</CardTitle>
-                <CardDescription className="text-base text-stone-300">
+                <CardTitle className="text-xl text-destructive">Assassinato Bloqueado!</CardTitle>
+                <CardDescription className="text-base text-card-foreground">
                     {contessaPlayer.name} alega Condessa para bloquear seu assassinato.
                     Você desafia a alegação de Condessa ou aceita o bloqueio (e a ação falha)?
                 </CardDescription>
             </CardHeader>
             <CardContent className="p-0 flex gap-3 justify-center">
-                <Button onClick={() => onAssassinationConfirmation('Challenge Contessa')} variant="destructive" size="lg" className="bg-red-600 hover:bg-red-700 text-white border-black border-2">
+                <Button onClick={() => onAssassinationConfirmation('Challenge Contessa')} variant="destructive" size="lg" className="bg-destructive hover:bg-destructive/90 text-destructive-foreground border-black border-2">
                     <UserX className="w-5 h-5 mr-2" /> Desafiar Condessa
                 </Button>
-                <Button onClick={() => onAssassinationConfirmation('Accept Block')} variant="secondary" size="lg" className="bg-gray-600 hover:bg-gray-500 text-white border-black border-2">
+                <Button onClick={() => onAssassinationConfirmation('Accept Block')} variant="secondary" size="lg" className="bg-muted hover:bg-muted/90 text-muted-foreground border-black border-2">
                     <UserCheck className="w-5 h-5 mr-2" /> Aceitar Bloqueio
                 </Button>
             </CardContent>
@@ -523,10 +524,10 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
     return (
         <div className="container mx-auto p-4 max-w-7xl ">
              {gameState.winner && (
-                 <Card className="mb-6 bg-yellow-500 text-black text-center py-6 rounded-xl border-4 border-black shadow-2xl">
+                 <Card className="mb-6 bg-primary text-primary-foreground text-center py-6 rounded-xl border-4 border-black shadow-2xl">
                     <CardHeader className="p-0">
                         <CardTitle className="text-3xl font-bold">Fim de Jogo!</CardTitle>
-                        <CardDescription className="text-2xl text-black/90 mt-1">{gameState.winner.name} venceu!</CardDescription>
+                        <CardDescription className="text-2xl text-primary-foreground/90 mt-1">{gameState.winner.name} venceu!</CardDescription>
                     </CardHeader>
                  </Card>
              )}
@@ -589,3 +590,4 @@ function getActivePlayers(gameState: GameState): Player[] {
     }
     return gameState.players.filter(p => p.influence.some(card => !card.revealed));
 }
+

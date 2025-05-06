@@ -8,8 +8,10 @@ body {
 }
 
 /* HEX to HSL conversions:
-  #ECF0F1 (Branco suave) -> hsl(200, 17%, 96%)
-  #2C3E50 (Azul-escuro neutro) -> hsl(210, 30%, 24%)
+  #ECF0F1 (Branco suave/Very Light Gray) -> hsl(200, 17%, 96%)
+  #BDC3C7 (Silver Gray - Lighter Gray for Cards) -> hsl(210, 14%, 75%)
+  #34495E (Wet Asphalt - Darker Foreground) -> hsl(210, 25%, 28%)
+  #2C3E50 (Azul-escuro neutro/Midnight Blue) -> hsl(210, 30%, 24%) -> Dark mode BG: hsl(210, 30%, 15%)
   #D4AF37 (Dourado) -> hsl(45, 65%, 52%)
   #9B1D20 (Vermelho do Duque) -> hsl(358, 69%, 36%) -> Lighter for primary: hsl(358, 69%, 40%)
   #1A5276 (Azul do Capitão) -> hsl(203, 64%, 28%) -> Lighter for secondary: hsl(203, 64%, 35%)
@@ -20,12 +22,12 @@ body {
 
 @layer base {
   :root {
-    /* Coup Game Theme - Light Mode (Derived from user request) */
-    --background: 200 17% 96%; /* #ECF0F1 Branco suave */
-    --foreground: 210 30% 24%; /* #2C3E50 Azul-escuro neutro */
+    /* Coup Game Theme - Light Mode (Updated) */
+    --background: 200 17% 96%; /* #ECF0F1 Very Light Gray / Branco Suave */
+    --foreground: 210 25% 28%; /* #34495E Darker Foreground */
 
-    --card: 200 17% 100%; /* White for cards */
-    --card-foreground: 210 30% 24%; /* Azul-escuro neutro */
+    --card: 210 14% 75%; /* #BDC3C7 Silver Gray */
+    --card-foreground: 210 30% 24%; /* #2C3E50 Azul-escuro */
 
     --popover: 200 17% 100%; /* White */
     --popover-foreground: 210 30% 24%; /* Azul-escuro neutro */
@@ -36,8 +38,8 @@ body {
     --secondary: 203 64% 35%; /* #1A5276 Azul do Capitão */
     --secondary-foreground: 200 17% 96%; /* Branco suave */
 
-    --muted: 210 25% 90%; /* Lighter Gray */
-    --muted-foreground: 210 25% 45%; /* Darker gray */
+    --muted: 210 15% 85%; /* Slightly darker muted gray */
+    --muted-foreground: 210 20% 40%; /* Darker muted text */
 
     --accent: 146 62% 48%; /* #28B463 Verde do Embaixador */
     --accent-foreground: 200 17% 96%; /* Branco suave */
@@ -46,7 +48,7 @@ body {
     --destructive-foreground: 200 17% 96%; /* Branco suave */
 
     --border: 45 65% 52%; /* #D4AF37 Dourado */
-    --input: 210 25% 94%; /* Light Gray Input Background */
+    --input: 210 16% 90%; /* Lighter Gray Input Background */
     --ring: 45 65% 52%; /* Dourado Focus Ring */
 
     /* Chart colors - using theme colors */
@@ -60,14 +62,14 @@ body {
   }
 
   .dark {
-    /* Coup Game Theme - Dark Mode (Derived from user request) */
-    --background: 210 30% 24%; /* #2C3E50 Azul-escuro neutro */
+    /* Coup Game Theme - Dark Mode (Updated) */
+    --background: 210 30% 15%; /* #1A2530 Darker Midnight Blue */
     --foreground: 200 17% 93%; /* #ECF0F1 Branco suave (for general text) */
 
-    --card: 210 30% 28%; /* Darker card, slightly lighter than bg */
+    --card: 210 30% 24%; /* #2C3E50 Original Dark Blue for cards */
     --card-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --popover: 210 30% 20%; /* Darker popover */
+    --popover: 210 30% 12%; /* Even Darker popover */
     --popover-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
     --primary: 358 69% 50%; /* #9B1D20 Vermelho do Duque (brighter for dark mode) */
@@ -76,7 +78,7 @@ body {
     --secondary: 203 64% 45%; /* #1A5276 Azul do Capitão (brighter for dark mode) */
     --secondary-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --muted: 210 30% 35%; /* Muted Slate */
+    --muted: 210 30% 28%; /* Muted Slate */
     --muted-foreground: 200 17% 75%; /* Lighter Muted text */
 
     --accent: 146 62% 55%; /* #28B463 Verde do Embaixador (brighter for dark mode) */
@@ -86,7 +88,7 @@ body {
     --destructive-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
     --border: 45 65% 60%; /* #D4AF37 Dourado (brighter for dark mode) */
-    --input: 210 30% 30%; /* Dark Slate Input Background */
+    --input: 210 30% 20%; /* Darker Slate Input Background */
     --ring: 45 65% 65%; /* Dourado focus ring */
 
     /* Chart colors - using theme colors where appropriate */

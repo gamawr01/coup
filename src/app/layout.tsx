@@ -16,7 +16,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    // Remove the 'dark' class to default to light mode
+    <html lang="en">
       <body className={`${inter.className} antialiased`}>
         {children}
         <Toaster /> {/* Add Toaster component */}
