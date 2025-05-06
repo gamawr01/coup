@@ -9,47 +9,47 @@ body {
 
 @layer base {
   :root {
-    /* Coup Game Theme - Light Mode (Parchment/Cream) */
-    --background: 35 50% 95%; /* Light Parchment/Cream */
-    --foreground: 30 20% 20%; /* Dark Brown */
+    /* Coup Game Theme - Light Mode (Updated) */
+    --background: 0 0% 98%; /* Almost white, very light gray */
+    --foreground: 240 10% 10%; /* Dark Slate Blue/Almost Black */
 
-    --card: 35 40% 90%; /* Slightly darker Parchment for cards */
-    --card-foreground: 30 20% 20%; /* Dark Brown */
+    --card: 0 0% 88%; /* Darker Gray for cards */
+    --card-foreground: 240 10% 10%; /* Dark Slate Blue/Almost Black */
 
-    --popover: 35 50% 95%; /* Light Parchment */
-    --popover-foreground: 30 20% 20%; /* Dark Brown */
+    --popover: 0 0% 98%; /* Almost white, to match background */
+    --popover-foreground: 240 10% 10%; /* Dark Slate Blue/Almost Black */
 
-    --primary: 0 70% 50%; /* Strong Red (like the box/Contessa) */
-    --primary-foreground: 35 50% 98%; /* Very light text on red */
+    --primary: 0 63% 40%; /* Deep Red */
+    --primary-foreground: 0 0% 98%; /* White */
 
-    --secondary: 45 70% 55%; /* Gold/Yellow (coins) */
-    --secondary-foreground: 45 40% 15%; /* Dark Brown/Black text on gold */
+    --secondary: 39 80% 50%; /* Gold */
+    --secondary-foreground: 39 50% 10%; /* Dark Brown */
 
-    --muted: 35 30% 88%; /* Muted Parchment */
-    --muted-foreground: 30 20% 40%; /* Medium Brown */
+    --muted: 240 5% 90%; /* Lighter Gray */
+    --muted-foreground: 240 5% 40%; /* Medium Gray */
 
-    --accent: 180 50% 45%; /* Teal/Dark Cyan */
-    --accent-foreground: 180 20% 95%; /* Light text on teal */
+    --accent: 210 70% 45%; /* Rich Blue */
+    --accent-foreground: 210 40% 98%; /* White */
 
-    --destructive: 0 70% 50%; /* Strong Red */
-    --destructive-foreground: 35 50% 98%; /* Very light text on red */
+    --destructive: 0 72% 51%; /* Bright Red for destructive actions */
+    --destructive-foreground: 0 0% 98%; /* White */
 
-    --border: 35 30% 75%; /* Parchment Border */
-    --input: 35 40% 92%; /* Slightly off-white input */
-    --ring: 0 70% 55%; /* Red focus ring */
+    --border: 240 5% 80%; /* Medium Gray Border */
+    --input: 240 5% 92%; /* Light Gray Input Background */
+    --ring: 210 70% 50%; /* Rich Blue Focus Ring */
 
     /* Chart colors - using theme colors */
-    --chart-1: 0 70% 50%;   /* Red */
-    --chart-2: 180 50% 50%; /* Teal */
-    --chart-3: 45 70% 60%; /* Gold */
-    --chart-4: 210 50% 60%; /* A lighter blue */
-    --chart-5: 220 15% 70%; /* Light Slate/Gray */
+    --chart-1: 0 63% 45%;   /* Deep Red */
+    --chart-2: 210 70% 50%; /* Rich Blue */
+    --chart-3: 39 80% 55%; /* Gold */
+    --chart-4: 120 40% 45%; /* Muted Green */
+    --chart-5: 270 50% 55%; /* Muted Purple */
 
     --radius: 0.5rem;
   }
 
   .dark {
-    /* Coup Game Theme - Dark Mode (Inspired by Game Box) */
+    /* Coup Game Theme - Dark Mode (Inspired by Game Box - Kept as before) */
     --background: 220 13% 18%; /* Dark Slate Blue/Gray */
     --foreground: 210 40% 98%; /* Very Light Gray/Off-white */
 
