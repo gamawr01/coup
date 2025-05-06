@@ -9,47 +9,47 @@ body {
 
 @layer base {
   :root {
-    /* Updated Light Theme: Shades of Light Gray with Character Colors */
-    --background: 0 0% 98%; /* Very Light Gray (Almost White) */
-    --foreground: 220 10% 20%; /* Dark Cool Gray */
+    /* Coup Game Theme - Light Mode */
+    --background: 35 50% 95%; /* Light Parchment/Cream */
+    --foreground: 30 20% 20%; /* Dark Brown */
 
-    --card: 0 0% 100%; /* White */
-    --card-foreground: 220 10% 20%; /* Dark Cool Gray */
+    --card: 35 40% 90%; /* Slightly darker Parchment for cards */
+    --card-foreground: 30 20% 20%; /* Dark Brown */
 
-    --popover: 0 0% 100%; /* White */
-    --popover-foreground: 220 10% 20%; /* Dark Cool Gray */
+    --popover: 35 50% 95%; /* Light Parchment */
+    --popover-foreground: 30 20% 20%; /* Dark Brown */
 
-    --primary: 221 83% 53%; /* Captain Blue */
-    --primary-foreground: 0 0% 100%; /* White */
+    --primary: 0 70% 50%; /* Strong Red (like the box/Contessa) */
+    --primary-foreground: 35 50% 98%; /* Very light text on red */
 
-    --secondary: 260 60% 60%; /* Duke Purple */
-    --secondary-foreground: 0 0% 100%; /* White */
+    --secondary: 45 60% 60%; /* Gold/Yellow (coins) */
+    --secondary-foreground: 30 25% 15%; /* Dark Brown on gold */
 
-    --muted: 0 0% 92%; /* Lighter Gray for muted backgrounds */
-    --muted-foreground: 0 0% 45%; /* Slightly darker muted gray text */
+    --muted: 35 30% 88%; /* Muted Parchment */
+    --muted-foreground: 30 20% 40%; /* Medium Brown */
 
-    --accent: 145 65% 40%; /* Ambassador Green */
+    --accent: 210 60% 50%; /* Blue (Captain/Ambassador influence color) */
     --accent-foreground: 0 0% 100%; /* White */
 
-    --destructive: 0 75% 55%; /* Contessa Red */
-    --destructive-foreground: 0 0% 100%; /* White */
+    --destructive: 0 70% 50%; /* Strong Red */
+    --destructive-foreground: 35 50% 98%; /* Very light text on red */
 
-    --border: 0 0% 88%; /* Light Gray Border */
-    --input: 0 0% 95%; /* Slightly off-white/light gray input */
-    --ring: 221 83% 53%; /* Primary blue for focus ring */
+    --border: 35 30% 75%; /* Parchment Border */
+    --input: 35 40% 92%; /* Slightly off-white input */
+    --ring: 0 70% 55%; /* Red focus ring */
 
-    /* Chart colors - based on character colors */
-    --chart-1: 0 75% 55%;   /* Red (Contessa) */
-    --chart-2: 221 83% 53%; /* Blue (Captain) */
-    --chart-3: 145 65% 40%; /* Green (Ambassador) */
-    --chart-4: 260 60% 60%; /* Purple (Duke) */
-    --chart-5: 220 10% 50%;  /* Neutral Gray (Assassin/General) */
+    /* Chart colors - using theme colors */
+    --chart-1: 0 70% 50%;   /* Red */
+    --chart-2: 210 60% 50%; /* Blue */
+    --chart-3: 45 60% 60%; /* Gold */
+    --chart-4: 120 40% 45%; /* Muted Green (Alternative/if needed) */
+    --chart-5: 30 20% 50%;  /* Brown/Gray */
 
     --radius: 0.5rem;
   }
 
   .dark {
-     /* Coup Theme - Dark Mode (Maintain similar feel to original dark theme) */
+     /* Coup Game Theme - Dark Mode */
     --background: 30 15% 12%; /* Very Dark Brown/Almost Black */
     --foreground: 35 25% 88%; /* Off-white/Light Parchment text */
 
@@ -62,8 +62,8 @@ body {
     --primary: 0 65% 55%; /* Slightly brighter Red */
     --primary-foreground: 0 0% 10%; /* Dark text on red */
 
-    --secondary: 45 25% 40%; /* Darker Muted Gold/Tan */
-    --secondary-foreground: 35 25% 90%; /* Lighter text */
+    --secondary: 45 55% 50%; /* Darker Muted Gold/Tan */
+    --secondary-foreground: 30 20% 10%; /* Dark text on gold */
 
     --muted: 30 10% 25%; /* Darker muted brown-gray */
     --muted-foreground: 35 30% 65%; /* Muted text */
@@ -79,11 +79,11 @@ body {
     --ring: 0 70% 60%; /* Red focus ring */
 
     /* Chart colors - brighter versions */
-    --chart-1: 0 65% 60%;
-    --chart-2: 210 60% 60%;
-    --chart-3: 120 45% 50%;
-    --chart-4: 270 50% 60%;
-    --chart-5: 45 35% 70%;
+    --chart-1: 0 65% 60%;   /* Red */
+    --chart-2: 210 60% 60%; /* Blue */
+    --chart-3: 45 65% 60%; /* Gold */
+    --chart-4: 120 40% 55%; /* Muted Green */
+    --chart-5: 35 25% 70%; /* Light Brown/Gray */
 
     --radius: 0.5rem;
   }
