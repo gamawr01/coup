@@ -7,10 +7,21 @@ body {
   background-color: hsl(var(--background)); /* Ensure body background is set */
 }
 
+/* HEX to HSL conversions:
+  #ECF0F1 (Branco suave) -> hsl(200, 17%, 96%)
+  #2C3E50 (Azul-escuro neutro) -> hsl(210, 30%, 24%)
+  #D4AF37 (Dourado) -> hsl(45, 65%, 52%)
+  #9B1D20 (Vermelho do Duque) -> hsl(358, 69%, 36%) -> Lighter for primary: hsl(358, 69%, 40%)
+  #1A5276 (Azul do Capitão) -> hsl(203, 64%, 28%) -> Lighter for secondary: hsl(203, 64%, 35%)
+  #28B463 (Verde do Embaixador) -> hsl(146, 62%, 43%) -> Lighter for accent: hsl(146, 62%, 48%)
+  #C0392B (Carmim da Condessa) -> hsl(7, 65%, 46%) -> Lighter for destructive: hsl(7, 65%, 50%)
+  #4A235A (Roxo do Assassino - not used directly in main palette)
+*/
+
 @layer base {
   :root {
     /* Coup Game Theme - Light Mode (Derived from user request) */
-    --background: 200 17% 96%; /* #ECF0F1 Branco suave (adjusted for off-white) */
+    --background: 200 17% 96%; /* #ECF0F1 Branco suave */
     --foreground: 210 30% 24%; /* #2C3E50 Azul-escuro neutro */
 
     --card: 200 17% 100%; /* White for cards */
