@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { GameState, Player, ActionType, InfluenceCard, CardType, GameResponseType, ChallengeDecisionType, BlockActionType } from '@/lib/game-types';
@@ -6,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
-import { Coins, Swords, Shield, Handshake, Skull, Replace, HandCoins, CircleDollarSign, HelpCircle, Ban, Check, ShieldAlert, ShieldCheck, UserCheck, UserX } from 'lucide-react'; // Added ShieldAlert, ShieldCheck, UserCheck, UserX
+import { Coins, Swords, Shield, Handshake, Skull, Replace, HandCoins, CircleDollarSign, HelpCircle, Ban, Check, ShieldAlert, ShieldCheck, UserCheck, UserX } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,24 +18,23 @@ interface GameBoardProps {
   humanPlayerId: string;
   onAction: (action: ActionType, targetId?: string) => void;
   onResponse: (response: GameResponseType) => void;
-  onExchange: (cardsToKeepIndices: number[]) => void; // Changed to indices
-  onForceReveal: (cardToReveal: CardType) => void; // Needs card type
-  onChallengeDecision: (decision: ChallengeDecisionType) => void; // Add this prop
-  onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void; // Add this prop
+  onExchange: (cardsToKeepIndices: number[]) => void;
+  onForceReveal: (cardToReveal: CardType) => void;
+  onChallengeDecision: (decision: ChallengeDecisionType) => void;
+  onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void;
 }
 
-// Mapping Card Types to Icons and Colors (adjust colors as needed)
-const cardInfo: Record<CardType, { icon: React.ReactNode; color: string }> = {
-  Duke: { icon: <CircleDollarSign className="w-4 h-4" />, color: 'bg-purple-600' },
-  Assassin: { icon: <Skull className="w-4 h-4" />, color: 'bg-red-600' },
-  Captain: { icon: <HandCoins className="w-4 h-4" />, color: 'bg-blue-600' },
-  Ambassador: { icon: <Handshake className="w-4 h-4" />, color: 'bg-green-600' },
-  Contessa: { icon: <Shield className="w-4 h-4" />, color: 'bg-yellow-600' },
+const cardInfo: Record<CardType, { icon: React.ReactNode; color: string; name: string }> = {
+  Duke: { icon: <CircleDollarSign />, color: 'bg-purple-600', name: 'Duque' },
+  Assassin: { icon: <Skull />, color: 'bg-red-700', name: 'Assassino' },
+  Captain: { icon: <HandCoins />, color: 'bg-blue-600', name: 'Capitão' },
+  Ambassador: { icon: <Handshake />, color: 'bg-green-600', name: 'Embaixador' },
+  Contessa: { icon: <Shield />, color: 'bg-yellow-500', name: 'Condessa' },
 };
 
 const actionIcons: Record<ActionType, React.ReactNode> = {
     Income: <Coins className="w-4 h-4" />,
-    'Foreign Aid': <Coins className="w-4 h-4" />, // Consider a different icon if needed
+    'Foreign Aid': <Coins className="w-4 h-4" />,
     Coup: <Swords className="w-4 h-4" />,
     Tax: <CircleDollarSign className="w-4 h-4" />,
     Assassinate: <Skull className="w-4 h-4" />,
@@ -44,45 +44,52 @@ const actionIcons: Record<ActionType, React.ReactNode> = {
 
 const InfluenceCardDisplay: React.FC<{ card: InfluenceCard; playerId: string; humanPlayerId: string }> = ({ card, playerId, humanPlayerId }) => {
   const isHumanPlayerCard = playerId === humanPlayerId;
-  const cardType = card?.type; // Safe access to card type
+  const cardType = card?.type;
 
-  // Determine display properties safely
-  const displayType = (card?.revealed || isHumanPlayerCard) && cardType ? cardType : 'Hidden';
-  const info = cardType ? cardInfo[cardType] : null;
+  const displayType = (card?.revealed || isHumanPlayerCard) && cardType ? cardInfo[cardType].name : 'Oculto';
+  const baseInfo = cardType ? cardInfo[cardType] : null;
+  
+  const showDetails = (card?.revealed || isHumanPlayerCard) && baseInfo;
 
-  const bgColor = card?.revealed ? 'bg-muted' : (isHumanPlayerCard && info ? info.color : 'bg-gray-700');
-  const textColor = card?.revealed ? 'text-muted-foreground line-through' : 'text-primary-foreground';
-  const icon = (card?.revealed || isHumanPlayerCard) && info ? info.icon : <HelpCircle className="w-4 h-4" />;
+  const bgColor = card?.revealed ? 'bg-muted opacity-60' : (showDetails && baseInfo ? baseInfo.color : 'bg-gray-700');
+  const textColor = card?.revealed ? 'text-muted-foreground line-through' : (showDetails ? 'text-white' : 'text-gray-300');
+  const iconToShow = showDetails && baseInfo ? baseInfo.icon : <HelpCircle />;
 
   return (
-    <Badge variant="secondary" className={`flex items-center gap-1 px-2 py-1 ${bgColor} ${textColor}`}>
-      {icon}
-      <span className="text-xs">{displayType}</span>
-    </Badge>
+    <div 
+      className={`flex flex-col items-center justify-between p-2 rounded-md border shadow-md w-20 h-28 text-center ${bgColor} ${textColor}`}
+      title={displayType}
+    >
+      <div className="flex-grow flex items-center justify-center w-full">
+        {React.cloneElement(iconToShow as React.ReactElement, { className: "w-8 h-8" })}
+      </div>
+      <span className="text-xs font-semibold mt-1 truncate w-full">{displayType}</span>
+    </div>
   );
 };
 
 
 const PlayerInfo: React.FC<{ player: Player; isCurrentPlayer: boolean; humanPlayerId: string }> = ({ player, isCurrentPlayer, humanPlayerId }) => (
-  <Card className={`mb-4 ${isCurrentPlayer ? 'border-primary border-2 shadow-lg' : ''} ${player.influence.every(c => c.revealed) ? 'opacity-50' : ''}`}>
+  <Card className={`mb-4 ${isCurrentPlayer ? 'border-primary border-2 shadow-xl' : 'shadow-md'} ${player.influence.every(c => c.revealed) ? 'opacity-60 bg-muted' : ''}`}>
     <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-      <CardTitle className="text-sm font-medium">{player.name} {player.id === humanPlayerId ? '(You)' : (player.isAI ? '(AI)' : '')}</CardTitle>
-      <Avatar className="h-8 w-8">
-         {/* Placeholder - replace with actual images if available */}
-         <AvatarImage src={`https://picsum.photos/seed/${player.id}/40/40`} data-ai-hint="player avatar"/>
-         <AvatarFallback>{player.name.substring(0, 1)}</AvatarFallback>
-       </Avatar>
-    </CardHeader>
-    <CardContent>
-      <div className="text-lg font-bold flex items-center">
-        <Coins className="w-5 h-5 mr-2 text-yellow-400" /> {player.money}
+      <div className="flex items-center gap-2">
+        <Avatar className="h-8 w-8">
+           <AvatarImage src={`https://picsum.photos/seed/${player.id}/40/40`} data-ai-hint="player avatar"/>
+           <AvatarFallback>{player.name.substring(0, 1).toUpperCase()}</AvatarFallback>
+        </Avatar>
+        <CardTitle className="text-sm font-medium">{player.name} {player.id === humanPlayerId ? '(Você)' : (player.isAI ? '(IA)' : '')}</CardTitle>
       </div>
-      <div className="flex flex-wrap gap-1 mt-2">
+      <div className="text-lg font-bold flex items-center">
+        <Coins className="w-5 h-5 mr-1 text-yellow-400" /> {player.money}
+      </div>
+    </CardHeader>
+    <CardContent className="pt-2">
+      <div className="flex flex-row gap-2 justify-center mt-1">
         {player.influence.map((card, index) => (
-          <InfluenceCardDisplay key={index} card={card} playerId={player.id} humanPlayerId={humanPlayerId} />
+          <InfluenceCardDisplay key={`${player.id}-influence-${index}`} card={card} playerId={player.id} humanPlayerId={humanPlayerId} />
         ))}
       </div>
-       {player.influence.every(c => c.revealed) && <p className="text-xs text-destructive mt-1">Eliminated</p>}
+       {player.influence.every(c => c.revealed) && <p className="text-xs text-destructive mt-2 text-center font-semibold">ELIMINADO</p>}
     </CardContent>
   </Card>
 );
@@ -91,7 +98,7 @@ const PlayerInfo: React.FC<{ player: Player; isCurrentPlayer: boolean; humanPlay
 const ActionLog: React.FC<{ logs: string[] }> = ({ logs }) => (
   <Card className="h-48">
     <CardHeader>
-      <CardTitle className="text-lg">Action Log</CardTitle>
+      <CardTitle className="text-lg">Registro de Ações</CardTitle>
     </CardHeader>
     <CardContent className="h-full pb-6">
       <ScrollArea className="h-32 pr-4">
@@ -116,7 +123,6 @@ const ActionButtons: React.FC<{
     const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId;
     const mustCoup = (humanPlayer?.money ?? 0) >= 10;
 
-    // Don't show buttons if not human's turn, or waiting for response/exchange/decision/confirmation/game over
     if (!isHumanTurn || !humanPlayer || gameState.challengeOrBlockPhase || gameState.pendingExchange || gameState.pendingChallengeDecision || gameState.pendingAssassinationConfirmation || gameState.winner || gameState.playerNeedsToReveal) {
         return null;
     }
@@ -129,7 +135,7 @@ const ActionButtons: React.FC<{
         possibleActions.push('Steal');
         possibleActions.push('Exchange');
     } else {
-        possibleActions.push('Coup'); // Only Coup is allowed if money >= 10
+        possibleActions.push('Coup');
     }
 
 
@@ -139,7 +145,7 @@ const ActionButtons: React.FC<{
     const handleActionClick = (action: ActionType) => {
         if (actionsNeedingTarget.includes(action)) {
             setSelectedAction(action);
-            setSelectedTarget(undefined); // Reset target selection
+            setSelectedTarget(undefined);
             setShowTargetDialog(true);
         } else {
             onAction(action);
@@ -191,31 +197,30 @@ const ActionButtons: React.FC<{
                 ))}
             </div>
 
-            {/* Target Selection Dialog */}
              <AlertDialog open={showTargetDialog} onOpenChange={setShowTargetDialog}>
                  <AlertDialogContent>
                      <AlertDialogHeader>
-                         <AlertDialogTitle>Select Target for {selectedAction}</AlertDialogTitle>
+                         <AlertDialogTitle>Selecionar Alvo para {selectedAction}</AlertDialogTitle>
                          <AlertDialogDescription>
-                             Choose which player to target with the {selectedAction} action.
+                             Escolha qual jogador será alvo da ação {selectedAction}.
                          </AlertDialogDescription>
                      </AlertDialogHeader>
                      <Select onValueChange={setSelectedTarget} value={selectedTarget}>
                          <SelectTrigger className="w-full">
-                             <SelectValue placeholder="Select a player..." />
+                             <SelectValue placeholder="Selecione um jogador..." />
                          </SelectTrigger>
                          <SelectContent>
                              {activeOpponents.map(opponent => (
                                  <SelectItem key={opponent.id} value={opponent.id}>
-                                     {opponent.name} ({opponent.money} coins, {opponent.influence.filter(inf => !inf.revealed).length} influence)
+                                     {opponent.name} ({opponent.money} moedas, {opponent.influence.filter(inf => !inf.revealed).length} influência)
                                  </SelectItem>
                              ))}
                          </SelectContent>
                      </Select>
                      <AlertDialogFooter>
-                         <AlertDialogCancel onClick={handleTargetCancel}>Cancel</AlertDialogCancel>
+                         <AlertDialogCancel onClick={handleTargetCancel}>Cancelar</AlertDialogCancel>
                          <AlertDialogAction onClick={handleTargetConfirm} disabled={!selectedTarget}>
-                             Confirm Target
+                             Confirmar Alvo
                          </AlertDialogAction>
                      </AlertDialogFooter>
                  </AlertDialogContent>
@@ -231,57 +236,53 @@ const ResponsePrompt: React.FC<{
     onResponse: (response: GameResponseType) => void;
 }> = ({ gameState, humanPlayerId, onResponse }) => {
     const phase = gameState.challengeOrBlockPhase;
-    // Check if it's the response phase AND the human is one of the possible responders AND hasn't responded yet
-    // AND ensure no other pending decision/confirmation is active
     if (!phase || !phase.possibleResponses.some(p => p.id === humanPlayerId) || phase.responses.some(r => r.playerId === humanPlayerId) || gameState.pendingChallengeDecision || gameState.pendingAssassinationConfirmation) {
         return null;
     }
 
 
-    const claimer = phase.actionPlayer; // Player making the current claim (action or block)
-    const claim = phase.action; // The action OR block being claimed
-    const originalActionTarget = phase.targetPlayer; // Original action target (if applicable)
-    const stage = phase.stage || 'challenge_action'; // Default to challenge_action if stage not set
-    // Use valid responses defined in the phase, fall back to generous defaults
+    const claimer = phase.actionPlayer;
+    const claim = phase.action;
+    const originalActionTarget = phase.targetPlayer;
+    const stage = phase.stage || 'challenge_action';
     const validResponses = phase.validResponses || ['Challenge', 'Allow', 'Block Foreign Aid', 'Block Stealing', 'Block Assassination'];
 
 
     let promptText = "";
-    let title = "Response Required!";
+    let title = "Resposta Necessária!";
 
      switch (stage) {
         case 'challenge_action':
-            // Someone claimed an action (e.g., Tax, Steal, Assassinate, Foreign Aid, Exchange)
-            promptText = `${claimer.name} claims ${claim}`;
+            promptText = `${claimer.name} alega ${claim}`;
             if (originalActionTarget) {
-                promptText += ` targeting ${originalActionTarget.id === humanPlayerId ? 'You' : originalActionTarget.name}.`;
+                promptText += ` mirando ${originalActionTarget.id === humanPlayerId ? 'Você' : originalActionTarget.name}.`;
             } else {
                 promptText += ".";
             }
-             promptText += " What do you do?";
+             promptText += " O que você faz?";
             break;
          case 'block_decision':
-             // Target (human) decides whether to block or allow an action like Assassinate or Steal
-             title = "Block or Allow?";
+             title = "Bloquear ou Permitir?";
              if (claim === 'Assassinate') {
-                promptText = `${claimer.name} is attempting to Assassinate You. Do you claim Contessa to block, or allow the assassination?`;
+                promptText = `${claimer.name} está tentando te Assassinar. Você alega Condessa para bloquear, ou permite o assassinato?`;
              } else if (claim === 'Steal') {
-                promptText = `${claimer.name} is attempting to Steal from You. Do you claim Captain or Ambassador to block, or allow the steal?`;
-             } else {
-                // Fallback for other blockable actions if needed
-                 promptText = `${claimer.name} is attempting ${claim} targeting You. Do you block or allow?`;
+                promptText = `${claimer.name} está tentando Roubar de Você. Você alega Capitão ou Embaixador para bloquear, ou permite o roubo?`;
+             } else if (claim === 'Foreign Aid') {
+                promptText = `${claimer.name} está tentando usar Ajuda Externa. Você alega Duque para bloquear, ou permite?`;
+             }
+              else {
+                 promptText = `${claimer.name} está tentando ${claim} mirando Você. Você bloqueia ou permite?`;
              }
              break;
         case 'challenge_block':
-            // Someone claimed a block (e.g., Block Foreign Aid, Block Stealing, Block Assassination)
-            const blockerName = claimer.name; // actionPlayer is the blocker in this stage
-            const originalActionTakerPlayer = gameState.currentAction?.player; // Get original action taker from context
-            const originalActionTakerName = originalActionTakerPlayer?.name || 'Unknown';
-             const originalAction = getActionFromBlock(claim as BlockActionType); // Get the action that was blocked
-             promptText = `${blockerName} claims to ${claim} against ${originalActionTakerName}'s ${originalAction}. Do you challenge their claim?`;
+            const blockerName = claimer.name;
+            const originalActionTakerPlayer = gameState.currentAction?.player;
+            const originalActionTakerName = originalActionTakerPlayer?.name || 'Desconhecido';
+             const originalAction = getActionFromBlock(claim as BlockActionType);
+             promptText = `${blockerName} alega ${claim} contra ${originalActionTakerName}'s ${originalAction}. Você desafia a alegação?`;
             break;
         default:
-             promptText = `${claimer.name} claims ${claim}. What do you do?`; // Fallback
+             promptText = `${claimer.name} alega ${claim}. O que você faz?`;
     }
 
 
@@ -292,19 +293,16 @@ const ResponsePrompt: React.FC<{
                 <CardDescription>{promptText}</CardDescription>
             </CardHeader>
             <CardContent className="flex gap-2 justify-center flex-wrap">
-                 {/* Always show Allow if it's a valid response */}
                  {validResponses.includes('Allow') && (
                     <Button onClick={() => onResponse('Allow')} variant="secondary">
-                        <Check className="w-4 h-4 mr-1" /> Allow
+                        <Check className="w-4 h-4 mr-1" /> Permitir
                     </Button>
                  )}
-                 {/* Show Challenge if it's a valid response */}
                  {validResponses.includes('Challenge') && (
                      <Button onClick={() => onResponse('Challenge')} variant="destructive">
-                         <HelpCircle className="w-4 h-4 mr-1" /> Challenge Claim
+                         <HelpCircle className="w-4 h-4 mr-1" /> Desafiar Alegação
                      </Button>
                  )}
-                 {/* Show relevant Block button(s) if valid */}
                  {validResponses.filter(r => r.startsWith('Block')).map(blockResponse => (
                      <Button key={blockResponse} onClick={() => onResponse(blockResponse as GameResponseType)} variant="outline">
                          <Ban className="w-4 h-4 mr-1" /> {blockResponse}
@@ -318,7 +316,7 @@ const ResponsePrompt: React.FC<{
 const ExchangePrompt: React.FC<{
     gameState: GameState;
     humanPlayerId: string;
-    onExchange: (cardsToKeepIndices: number[]) => void; // Pass indices
+    onExchange: (cardsToKeepIndices: number[]) => void;
 }> = ({ gameState, humanPlayerId, onExchange }) => {
     const exchangeInfo = gameState.pendingExchange;
     const player = gameState.players.find(p => p.id === humanPlayerId);
@@ -329,71 +327,64 @@ const ExchangePrompt: React.FC<{
 
     const cardsToChooseFrom = exchangeInfo.cardsToChoose;
     const currentInfluenceCount = player.influence.filter(c => !c.revealed).length;
-    // State now stores the indices of selected cards from the `cardsToChooseFrom` array
     const [selectedIndices, setSelectedIndices] = useState<number[]>([]);
 
     const handleCardToggle = (index: number) => {
         setSelectedIndices(prev => {
             const isSelected = prev.includes(index);
              if (isSelected) {
-                 // Deselect: remove the index
                  return prev.filter(i => i !== index);
              } else if (prev.length < currentInfluenceCount) {
-                // Select if not exceeding limit
                 return [...prev, index];
             }
-            return prev; // Limit reached, do nothing
+            return prev;
         });
     };
 
     const canConfirm = selectedIndices.length === currentInfluenceCount;
 
-    // Map selected indices back to card types for the onExchange callback
     const handleConfirm = () => {
          if (canConfirm) {
-            // const cardsToKeep = selectedIndices.map(index => cardsToChooseFrom[index]);
-            onExchange(selectedIndices); // Pass the indices directly
+            onExchange(selectedIndices);
          }
      };
 
     return (
         <Card className="mt-4 border-primary border-2 shadow-lg">
             <CardHeader>
-                <CardTitle>Exchange Cards</CardTitle>
-                <CardDescription>Choose {currentInfluenceCount} card(s) to keep. The rest will be returned to the deck.</CardDescription>
+                <CardTitle>Trocar Cartas</CardTitle>
+                <CardDescription>Escolha {currentInfluenceCount} carta(s) para manter. O resto será devolvido ao baralho.</CardDescription>
             </CardHeader>
             <CardContent>
                 <div className="flex flex-wrap gap-2 justify-center mb-4">
                     {cardsToChooseFrom.map((card, index) => {
                          const isSelected = selectedIndices.includes(index);
-                         const info = card ? cardInfo[card] : null; // Safe access
+                         const info = card ? cardInfo[card] : null;
                          return (
                              <Button
-                                key={index} // Use index as the unique key
+                                key={`${card}-${index}`} // Ensure unique key even with duplicate cards
                                 variant={isSelected ? 'default' : 'outline'}
                                 onClick={() => handleCardToggle(index)}
                                 className="flex items-center gap-1"
                               >
-                                 {info?.icon || <HelpCircle className="w-4 h-4"/>} {card || 'Unknown'}
+                                 {info?.icon || <HelpCircle className="w-4 h-4"/>} {info?.name || 'Desconhecido'}
                               </Button>
                          );
                     })}
                 </div>
                  <Button onClick={handleConfirm} disabled={!canConfirm} className="w-full">
-                     Confirm Selection
+                     Confirmar Seleção
                  </Button>
             </CardContent>
         </Card>
     );
 };
 
-// Component to handle forced reveals (losing challenge, Coup, Assassination)
 const ForcedRevealPrompt: React.FC<{
     gameState: GameState;
     humanPlayerId: string;
-    onForceReveal: (cardToReveal: CardType) => void; // Needs card type
+    onForceReveal: (cardToReveal: CardType) => void;
 }> = ({ gameState, humanPlayerId, onForceReveal }) => {
-    // Use the dedicated flag from game state
     const needsToReveal = gameState.playerNeedsToReveal === humanPlayerId;
     const player = gameState.players.find(p => p.id === humanPlayerId);
 
@@ -403,24 +394,22 @@ const ForcedRevealPrompt: React.FC<{
 
     const unrevealedCards = player.influence.filter(c => !c.revealed);
 
-    // If only one card left, it should be revealed automatically by game logic usually.
-     // Auto-reveal is handled in handleForceReveal now
     if (unrevealedCards.length <= 1) {
-        return null; // Hide prompt if only 0 or 1 card left, logic handles it
+        return null;
     }
 
     return (
         <Card className="mt-4 border-destructive border-2 shadow-lg">
             <CardHeader>
-                <CardTitle>Reveal Influence</CardTitle>
-                <CardDescription>You must reveal one of your influence cards.</CardDescription>
+                <CardTitle>Revelar Influência</CardTitle>
+                <CardDescription>Você deve revelar uma de suas cartas de influência.</CardDescription>
             </CardHeader>
             <CardContent className="flex gap-2 justify-center">
                 {unrevealedCards.map((card, index) => {
                      const info = card?.type ? cardInfo[card.type] : null;
                      return (
                          <Button key={index} onClick={() => card.type && onForceReveal(card.type)} variant="destructive" className="flex items-center gap-1" disabled={!card.type}>
-                            {info?.icon || <HelpCircle className="w-4 h-4"/>} Reveal {card.type || 'Unknown'}
+                            {info?.icon || <HelpCircle className="w-4 h-4"/>} Revelar {info?.name || 'Desconhecido'}
                          </Button>
                      )
                 })}
@@ -429,84 +418,75 @@ const ForcedRevealPrompt: React.FC<{
     );
 };
 
-// New component for the challenge decision phase
 const ChallengeDecisionPrompt: React.FC<{
     gameState: GameState;
     humanPlayerId: string;
     onChallengeDecision: (decision: ChallengeDecisionType) => void;
 }> = ({ gameState, humanPlayerId, onChallengeDecision }) => {
     const decisionPhase = gameState.pendingChallengeDecision;
-    // console.log("[ChallengeDecisionPrompt] Rendering. Phase:", decisionPhase, "Human ID:", humanPlayerId);
 
-
-    // Show only if it's the human player's turn to decide
     if (!decisionPhase || decisionPhase.challengedPlayerId !== humanPlayerId) {
         return null;
     }
 
     const challenger = gameState.players.find(p => p.id === decisionPhase.challengerId);
     const actionOrBlock = decisionPhase.actionOrBlock;
+    const actionOrBlockDisplayName = typeof actionOrBlock === 'string' && actionOrBlock.startsWith('Block ') ? actionOrBlock : (cardInfo[actionOrBlock as CardType]?.name || actionOrBlock);
 
-    if (!challenger) return null; // Safety check
 
-     // console.log("[ChallengeDecisionPrompt] Displaying prompt for human.");
+    if (!challenger) return null;
 
     return (
         <Card className="mt-4 border-yellow-500 border-2 shadow-lg">
             <CardHeader>
-                <CardTitle>Challenge Decision!</CardTitle>
+                <CardTitle>Decisão de Desafio!</CardTitle>
                 <CardDescription>
-                    {challenger.name} has challenged your claim of {actionOrBlock}.
-                    Do you want to proceed (reveal card or lose influence if bluffing) or retreat (cancel the action/block)?
+                    {challenger.name} desafiou sua alegação de {actionOrBlockDisplayName}.
+                    Você quer prosseguir (revelar carta ou perder influência se estiver blefando) ou recuar (cancelar a ação/bloqueio)?
                 </CardDescription>
             </CardHeader>
             <CardContent className="flex gap-2 justify-center">
                 <Button onClick={() => onChallengeDecision('Proceed')} variant="default">
-                    <ShieldCheck className="w-4 h-4 mr-1" /> Proceed
+                    <ShieldCheck className="w-4 h-4 mr-1" /> Prosseguir
                 </Button>
                 <Button onClick={() => onChallengeDecision('Retreat')} variant="outline">
-                    <ShieldAlert className="w-4 h-4 mr-1" /> Retreat
+                    <ShieldAlert className="w-4 h-4 mr-1" /> Recuar
                 </Button>
             </CardContent>
         </Card>
     );
 };
 
-// New component for the Assassin's confirmation after Contessa block
 const AssassinationConfirmationPrompt: React.FC<{
     gameState: GameState;
     humanPlayerId: string;
     onAssassinationConfirmation: (decision: 'Challenge Contessa' | 'Accept Block') => void;
 }> = ({ gameState, humanPlayerId, onAssassinationConfirmation }) => {
     const confirmPhase = gameState.pendingAssassinationConfirmation;
-     // console.log("[AssassinationConfirmationPrompt] Rendering. Phase:", confirmPhase, "Human ID:", humanPlayerId);
 
-    // Show only if it's the human player's (Assassin) turn to confirm
     if (!confirmPhase || confirmPhase.assassinPlayerId !== humanPlayerId) {
         return null;
     }
 
     const contessaPlayer = gameState.players.find(p => p.id === confirmPhase.contessaPlayerId);
 
-    if (!contessaPlayer) return null; // Safety check
-
-    // console.log("[AssassinationConfirmationPrompt] Displaying prompt for human Assassin.");
+    if (!contessaPlayer) return null;
 
     return (
         <Card className="mt-4 border-orange-500 border-2 shadow-lg">
             <CardHeader>
-                <CardTitle>Assassination Blocked!</CardTitle>
+                <CardTitle>Assassinato Bloqueado!</CardTitle>
                 <CardDescription>
-                    {contessaPlayer.name} claims Contessa to block your assassination.
-                    Do you challenge their Contessa claim or accept the block?
+                    {contessaPlayer.name} alega Condessa para bloquear seu assassinato.
+                    Você desafia a alegação de Condessa ou aceita o bloqueio?
                 </CardDescription>
             </CardHeader>
             <CardContent className="flex gap-2 justify-center">
                 <Button onClick={() => onAssassinationConfirmation('Challenge Contessa')} variant="destructive">
-                    <UserX className="w-4 h-4 mr-1" /> Challenge Contessa
+                    <UserX className="w-4 h-4 mr-1" /> Desafiar Condessa
                 </Button>
                 <Button onClick={() => onAssassinationConfirmation('Accept Block')} variant="secondary">
-                    <UserCheck className="w-4 h-4 mr-1" /> Accept Block
+                    <UserCheck className="w-4 h-4 mr-1" /> Aceitar Bloqueio
                 </Button>
             </CardContent>
         </Card>
@@ -517,48 +497,32 @@ const AssassinationConfirmationPrompt: React.FC<{
 export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, onAction, onResponse, onExchange, onForceReveal, onChallengeDecision, onAssassinationConfirmation }) => {
     const humanPlayer = gameState.players.find(p => p.id === humanPlayerId);
     const otherPlayers = gameState.players.filter(p => p.id !== humanPlayerId);
-     // console.log("[GameBoard] Rendering. GameState:", gameState, "Human ID:", humanPlayerId); // Add top-level log
 
-
-    // Determine if the human player *needs* to act
     const isHumanTurn = gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId && !gameState.challengeOrBlockPhase && !gameState.pendingExchange && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation && !gameState.winner && !gameState.playerNeedsToReveal;
     const isHumanResponding = gameState.challengeOrBlockPhase?.possibleResponses.some(p => p.id === humanPlayerId) && !gameState.challengeOrBlockPhase?.responses.some(r => r.playerId === humanPlayerId) && !gameState.pendingChallengeDecision && !gameState.pendingAssassinationConfirmation;
     const isHumanExchanging = gameState.pendingExchange?.player.id === humanPlayerId;
     const isHumanDecidingChallenge = gameState.pendingChallengeDecision?.challengedPlayerId === humanPlayerId;
     const isHumanConfirmingAssassination = gameState.pendingAssassinationConfirmation?.assassinPlayerId === humanPlayerId;
-    const isHumanForcedToReveal = gameState.playerNeedsToReveal === humanPlayerId; // Use the direct flag
-
-      // Log which prompt should be active
-      /* console.log("[GameBoard] Active States:", {
-         isHumanTurn,
-         isHumanResponding,
-         isHumanExchanging,
-         isHumanDecidingChallenge,
-         isHumanConfirmingAssassination,
-         isHumanForcedToReveal
-       }); */
-
+    const isHumanForcedToReveal = gameState.playerNeedsToReveal === humanPlayerId;
 
     return (
-        <div className="container mx-auto p-4 max-w-4xl ">
+        <div className="container mx-auto p-4 max-w-5xl ">
              {gameState.winner && (
                  <Card className="mb-4 bg-primary text-primary-foreground">
                     <CardHeader>
-                        <CardTitle className="text-center text-2xl">Game Over!</CardTitle>
-                        <CardDescription className="text-center text-xl">{gameState.winner.name} wins!</CardDescription>
+                        <CardTitle className="text-center text-2xl">Fim de Jogo!</CardTitle>
+                        <CardDescription className="text-center text-xl">{gameState.winner.name} venceu!</CardDescription>
                     </CardHeader>
                  </Card>
              )}
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Player Info Area (Human) */}
                  <div className="md:col-span-1">
                      {humanPlayer && <PlayerInfo player={humanPlayer} isCurrentPlayer={gameState.players[gameState.currentPlayerIndex]?.id === humanPlayerId} humanPlayerId={humanPlayerId} />}
                      <ActionLog logs={gameState.actionLog} />
                  </div>
 
-                {/* Opponent Info Area */}
-                <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="md:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                     {otherPlayers.map(player => (
                          <PlayerInfo
                             key={player.id}
@@ -568,12 +532,8 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
                          />
                     ))}
                 </div>
-
-
             </div>
 
-
-             {/* Action/Response Area */}
             <div className="mt-6">
                 {isHumanTurn && <ActionButtons gameState={gameState} humanPlayerId={humanPlayerId} onAction={onAction} />}
                 {isHumanResponding && <ResponsePrompt gameState={gameState} humanPlayerId={humanPlayerId} onResponse={onResponse} />}
@@ -586,7 +546,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({ gameState, humanPlayerId, 
     );
 };
 
-// Helper to get original action if a block is claimed
 function getActionFromBlock(block: BlockActionType): ActionType | null {
     switch (block) {
        case 'Block Foreign Aid': return 'Foreign Aid';
@@ -596,7 +555,6 @@ function getActionFromBlock(block: BlockActionType): ActionType | null {
    }
 }
 
-// Helper to find which block corresponds to an action
 function getBlockTypeForAction(action: ActionType): BlockActionType | null {
      switch (action) {
         case 'Foreign Aid': return 'Block Foreign Aid';
