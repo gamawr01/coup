@@ -9,81 +9,81 @@ body {
 
 @layer base {
   :root {
-    /* Coup Game Theme - Light Mode (Updated) */
-    --background: 0 0% 98%; /* Almost white, very light gray */
-    --foreground: 240 10% 10%; /* Dark Slate Blue/Almost Black */
+    /* Coup Game Theme - Light Mode (Derived from user request) */
+    --background: 200 17% 96%; /* #ECF0F1 Branco suave (adjusted for off-white) */
+    --foreground: 210 30% 24%; /* #2C3E50 Azul-escuro neutro */
 
-    --card: 0 0% 88%; /* Darker Gray for cards */
-    --card-foreground: 240 10% 10%; /* Dark Slate Blue/Almost Black */
+    --card: 200 17% 100%; /* White for cards */
+    --card-foreground: 210 30% 24%; /* Azul-escuro neutro */
 
-    --popover: 0 0% 98%; /* Almost white, to match background */
-    --popover-foreground: 240 10% 10%; /* Dark Slate Blue/Almost Black */
+    --popover: 200 17% 100%; /* White */
+    --popover-foreground: 210 30% 24%; /* Azul-escuro neutro */
 
-    --primary: 0 63% 40%; /* Deep Red */
-    --primary-foreground: 0 0% 98%; /* White */
+    --primary: 358 69% 40%; /* #9B1D20 Vermelho do Duque */
+    --primary-foreground: 200 17% 96%; /* Branco suave */
 
-    --secondary: 39 80% 50%; /* Gold */
-    --secondary-foreground: 39 50% 10%; /* Dark Brown */
+    --secondary: 203 64% 35%; /* #1A5276 Azul do Capitão */
+    --secondary-foreground: 200 17% 96%; /* Branco suave */
 
-    --muted: 240 5% 90%; /* Lighter Gray */
-    --muted-foreground: 240 5% 40%; /* Medium Gray */
+    --muted: 210 25% 90%; /* Lighter Gray */
+    --muted-foreground: 210 25% 45%; /* Darker gray */
 
-    --accent: 210 70% 45%; /* Rich Blue */
-    --accent-foreground: 210 40% 98%; /* White */
+    --accent: 146 62% 48%; /* #28B463 Verde do Embaixador */
+    --accent-foreground: 200 17% 96%; /* Branco suave */
 
-    --destructive: 0 72% 51%; /* Bright Red for destructive actions */
-    --destructive-foreground: 0 0% 98%; /* White */
+    --destructive: 7 65% 50%; /* #C0392B Carmim da Condessa */
+    --destructive-foreground: 200 17% 96%; /* Branco suave */
 
-    --border: 240 5% 80%; /* Medium Gray Border */
-    --input: 240 5% 92%; /* Light Gray Input Background */
-    --ring: 210 70% 50%; /* Rich Blue Focus Ring */
+    --border: 45 65% 52%; /* #D4AF37 Dourado */
+    --input: 210 25% 94%; /* Light Gray Input Background */
+    --ring: 45 65% 52%; /* Dourado Focus Ring */
 
     /* Chart colors - using theme colors */
-    --chart-1: 0 63% 45%;   /* Deep Red */
-    --chart-2: 210 70% 50%; /* Rich Blue */
-    --chart-3: 39 80% 55%; /* Gold */
-    --chart-4: 120 40% 45%; /* Muted Green */
-    --chart-5: 270 50% 55%; /* Muted Purple */
+    --chart-1: 358 69% 40%;   /* Deep Red */
+    --chart-2: 203 64% 35%; /* Rich Blue */
+    --chart-3: 146 62% 48%; /* Green */
+    --chart-4: 45 65% 52%; /* Gold */
+    --chart-5: 7 65% 50%; /* Carmim */
 
     --radius: 0.5rem;
   }
 
   .dark {
-    /* Coup Game Theme - Dark Mode (Inspired by Game Box - Kept as before) */
-    --background: 220 13% 18%; /* Dark Slate Blue/Gray */
-    --foreground: 210 40% 98%; /* Very Light Gray/Off-white */
+    /* Coup Game Theme - Dark Mode (Derived from user request) */
+    --background: 210 30% 24%; /* #2C3E50 Azul-escuro neutro */
+    --foreground: 200 17% 93%; /* #ECF0F1 Branco suave (for general text) */
 
-    --card: 220 13% 22%; /* Slightly Lighter Dark Slate for cards */
-    --card-foreground: 210 40% 98%;
+    --card: 210 30% 28%; /* Darker card, slightly lighter than bg */
+    --card-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --popover: 220 13% 15%; /* Even darker Slate for popovers */
-    --popover-foreground: 210 40% 98%;
+    --popover: 210 30% 20%; /* Darker popover */
+    --popover-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --primary: 0 65% 55%; /* Strong Red (like box logo/accents) */
-    --primary-foreground: 0 0% 100%; /* White text on red */
+    --primary: 358 69% 50%; /* #9B1D20 Vermelho do Duque (brighter for dark mode) */
+    --primary-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --secondary: 45 70% 55%; /* Gold/Yellow (coins/accent) */
-    --secondary-foreground: 45 40% 15%; /* Dark Brown/Black text on gold */
+    --secondary: 203 64% 45%; /* #1A5276 Azul do Capitão (brighter for dark mode) */
+    --secondary-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --muted: 220 13% 30%; /* Muted Slate */
-    --muted-foreground: 210 30% 75%; /* Lighter Muted text */
+    --muted: 210 30% 35%; /* Muted Slate */
+    --muted-foreground: 200 17% 75%; /* Lighter Muted text */
 
-    --accent: 180 50% 45%; /* Teal/Dark Cyan (alternative accent from box) */
-    --accent-foreground: 180 20% 95%; /* Light text on teal */
+    --accent: 146 62% 55%; /* #28B463 Verde do Embaixador (brighter for dark mode) */
+    --accent-foreground: 210 30% 15%; /* Darker text for green buttons */
 
-    --destructive: 0 70% 60%; /* Brighter Red for destructive actions */
-    --destructive-foreground: 0 0% 100%; /* White text on red */
+    --destructive: 7 65% 55%; /* #C0392B Carmim da Condessa (brighter for dark mode) */
+    --destructive-foreground: 200 17% 93%; /* #ECF0F1 Branco suave */
 
-    --border: 220 13% 35%; /* Dark Slate Border */
-    --input: 220 13% 25%; /* Dark Slate Input Background */
-    --ring: 0 70% 60%; /* Red focus ring */
+    --border: 45 65% 60%; /* #D4AF37 Dourado (brighter for dark mode) */
+    --input: 210 30% 30%; /* Dark Slate Input Background */
+    --ring: 45 65% 65%; /* Dourado focus ring */
 
     /* Chart colors - using theme colors where appropriate */
-    --chart-1: 0 65% 60%;   /* Red */
-    --chart-2: 180 50% 50%; /* Teal */
-    --chart-3: 45 70% 60%; /* Gold */
-    --chart-4: 210 50% 60%; /* A lighter blue */
-    --chart-5: 220 15% 70%;  /* Light Slate/Gray */
+    --chart-1: 358 69% 50%;   /* Red */
+    --chart-2: 203 64% 45%; /* Blue */
+    --chart-3: 146 62% 55%; /* Green */
+    --chart-4: 45 65% 60%; /* Gold */
+    --chart-5: 7 65% 55%; /* Carmim */
 
     --radius: 0.5rem;
   }
